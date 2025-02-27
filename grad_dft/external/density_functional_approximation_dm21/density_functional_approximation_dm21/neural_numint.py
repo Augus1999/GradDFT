@@ -216,7 +216,7 @@ class NeuralNumInt(numint.NumInt):
             library.
         """
 
-        self._functional = hub.Module(spec=self._model_path)
+        self._functional = hub.load(spec=self._model_path)
 
         grid_coords = tf.placeholder(tf.float32, shape=[batch_dim, 3], name="grid_coords")
         grid_weights = tf.placeholder(tf.float32, shape=[batch_dim], name="grid_weights")
@@ -351,7 +351,7 @@ class NeuralNumInt(numint.NumInt):
             spec = hub.create_module_spec(
                 self._build_graph, tags_and_args=[(set(), {"batch_dim": batch_dim})]
             )
-            functional_and_derivatives = hub.Module(spec=spec)
+            functional_and_derivatives = hub.load(spec=spec)
             with tf.Session() as session:
                 session.run(tf.global_variables_initializer())
                 functional_and_derivatives.export(export_path, session)

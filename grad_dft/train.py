@@ -444,7 +444,7 @@ def dm21_grad_regularization(
 
     prefactors = numerator / safe_denominator
 
-    dE = jnp.clip(0.5 * jnp.sum(prefactors * factors), a_min=-10, a_max=10)
+    dE = jnp.clip(0.5 * jnp.sum(prefactors * factors), min=-10, max=10)
 
     return dE**2
 
@@ -608,15 +608,15 @@ def sq_electron_err_int(
         Scalar: the value epsilon described above
     ----------
     """
-    pred_density = jnp.clip(pred_density, a_min=clip_cte)
-    truth_density = jnp.clip(truth_density, a_min=clip_cte)
+    pred_density = jnp.clip(pred_density, min=clip_cte)
+    truth_density = jnp.clip(truth_density, min=clip_cte)
     diff_up = jnp.clip(
-        jnp.clip(pred_density[:, 0] - truth_density[:, 0], a_min=clip_cte) ** 2,
-        a_min=clip_cte,
+        jnp.clip(pred_density[:, 0] - truth_density[:, 0], min=clip_cte) ** 2,
+        min=clip_cte,
     )
     diff_dn = jnp.clip(
-        jnp.clip(pred_density[:, 1] - truth_density[:, 1], a_min=clip_cte) ** 2,
-        a_min=clip_cte,
+        jnp.clip(pred_density[:, 1] - truth_density[:, 1], min=clip_cte) ** 2,
+        min=clip_cte,
     )
     err_int = jnp.sum(diff_up * atoms.grid.weights) + jnp.sum(
         diff_dn * atoms.grid.weights
