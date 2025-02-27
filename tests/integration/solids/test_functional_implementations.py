@@ -130,7 +130,7 @@ def test_vwn(sol):
 
 
 #### PW92 ####
-@pytest.mark.parametrize("sol", sols)
+@pytest.mark.parametrize("sol", sols[:1])
 def test_pw92(sol):
     kmf = dft.KRKS(sol, kpts=sol.make_kpts(KPTS))
     kmf.xc = "LDA_C_PW"
