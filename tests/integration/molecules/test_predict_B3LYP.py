@@ -19,7 +19,7 @@
 import pytest
 
 # This only works on startup!
-from jax.config import config
+from jax import config
 config.update("jax_enable_x64", True)
 
 from grad_dft import molecule_from_pyscf, scf_loop
