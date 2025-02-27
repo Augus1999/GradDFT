@@ -95,14 +95,14 @@ for mol in PYSCF_MOLS:
 # Define a simple neural functional and its initial parameters
 
 def coefficient_inputs(molecule: Molecule, clip_cte: float = 1e-30, *_, **__):
-    rho = jnp.clip(molecule.density(), a_min = clip_cte)
+    rho = jnp.clip(molecule.density(), min=clip_cte)
     return jnp.concatenate((rho, ), axis = 1)
 
 def energy_densities(molecule: Molecule, clip_cte: float = 1e-30, *_, **__):
     r"""Auxiliary function to generate the features of LSDA."""
     rho = molecule.density()
     # To avoid numerical issues in JAX we limit too small numbers.
-    rho = jnp.clip(rho, a_min = clip_cte)
+    rho = jnp.clip(rho, min=clip_cte)
     # Now we can implement the LSDA exchange energy density
     lda_e = -3/2 * (3/(4*jnp.pi)) ** (1/3) * (rho**(4/3)).sum(axis = 1, keepdims = True)
     return lda_e

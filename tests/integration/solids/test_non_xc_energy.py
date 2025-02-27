@@ -88,7 +88,8 @@ def solid_and_energies(geom) -> tuple[float, float]:
     """
     kmf = dft.KRKS(geom, kpts=geom.make_kpts(KPTS))
     kmf.xc = "0.00*LDA"  # quick way of having no XC energy in PySCF
-    E_pyscf = kmf.kernel(max_cycle=SCF_ITERS)
+    kmf.max_cycle = SCF_ITERS
+    E_pyscf = kmf.kernel()
     sol = solid_from_pyscf(kmf)
     E_gdft = sol.nonXC()
     return E_pyscf, E_gdft
