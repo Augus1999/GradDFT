@@ -1,11 +1,7 @@
 name: Installing Grad-DFT and running tests
 
 on:
-  pull_request:
-    types:
-      - synchronize
-      - opened
-      - reopened
+  [push]
 
 jobs:
   build:
@@ -14,7 +10,7 @@ jobs:
       PYSCF_CONFIG_FILE: ".github/workflows/pyscf_conf.py"
     strategy:
       matrix:
-        python-version: ["3.9", "3.10", "3.11"]
+        python-version: ["3.10", "3.11", "3.12]
         os: [ubuntu-latest]
     steps:
       - uses: actions/checkout@v3
