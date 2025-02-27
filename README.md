@@ -6,7 +6,7 @@
 
 ![Dark Theme Image](media/README/dark_logo.svg#gh-dark-mode-only)
 
-[![build](https://img.shields.io/badge/build-passing-graygreen.svg "https://github.com/Augus1999/GradDFT/actions")](https://github.com/Augus1999/GradDFT/actions)
+[![build](https://github.com/Augus1999/GradDFT/actions/workflows/install_and_test.yml/badge.svg)](https://github.com/Augus1999/GradDFT/actions)
 [![arXiv](http://img.shields.io/badge/arXiv-2309.15127-B31B1B.svg "Grad-DFT")](https://arxiv.org/abs/2309.15127)
 [![arXiv](http://img.shields.io/badge/2024-JCP-273c75.svg "Grad-DFT")](https://doi.org/10.1063/5.0181037)
 [![License](https://img.shields.io/badge/License-Apache%202.0-9F9F9F "https://github.com/Augus1999/GradDFT/blob/main/LICENSE")](https://github.com/Augus1999/GradDFT/blob/main/LICENSE)
