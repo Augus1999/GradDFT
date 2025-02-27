@@ -1,17 +1,19 @@
 name: Installing Grad-DFT and running tests
 
 on:
-  [push]
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
 
 jobs:
   build:
-    runs-on: ${{ matrix.os }}
+    runs-on: ubuntu-latest
     env:
       PYSCF_CONFIG_FILE: ".github/workflows/pyscf_conf.py"
     strategy:
       matrix:
-        python-version: ["3.10", "3.11", "3.12]
-        os: [ubuntu-latest]
+        python-version: ["3.10", "3.11", "3.12"]
     steps:
       - uses: actions/checkout@v3
       - name: Set up Python ${{ matrix.python-version }}
