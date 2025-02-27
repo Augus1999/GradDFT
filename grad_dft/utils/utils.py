@@ -12,11 +12,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import json
 import argparse
 from typing import Optional
-from grad_dft.utils import DType, default_dtype
 import jax.numpy as jnp
-import json
+from grad_dft.utils import DType, default_dtype
 
 
 def to_device_arrays(*arrays, dtype: Optional[DType] = None):

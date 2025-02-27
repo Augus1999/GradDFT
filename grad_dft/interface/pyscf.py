@@ -12,21 +12,25 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from random import shuffle
-from typing import List, Optional, Tuple, Union, Sequence, Dict
-from itertools import chain, combinations_with_replacement, product
 import os
+from random import shuffle
+from typing import Optional, Tuple, Union, Sequence, Dict
+from itertools import chain, combinations_with_replacement, product
 
+import h5py
 import numpy as np
 from jax import numpy as jnp
 from jax.lax import Precision
 from jax import vmap
+from jax.tree_util import tree_map
+from jaxtyping import Array, Scalar
 
-from pyscf import scf  # type: ignore
-from pyscf.dft import Grids, numint  # type: ignore
+import pyscf.data.elements as elements
+from pyscf import dft
+from pyscf.pbc import df
+from pyscf.dft import Grids, numint
 from pyscf.pbc.dft import numint as pbc_numint
 from pyscf.gto import Mole
-import pyscf.data.elements as elements
 from pyscf.pbc.gto.cell import Cell
 from pyscf.pbc.lib.kpts import KPoints
 from pyscf.pbc.df.fft import FFTDF
@@ -34,21 +38,11 @@ from pyscf.pbc.df.mdf import MDF
 from pyscf.pbc.df.df import GDF
 from pyscf.ao2mo import restore
 
-# from qdft.reaction import Reaction, make_reaction, get_grad
 from grad_dft.molecule import Grid, Molecule, Reaction, make_reaction
 from grad_dft.solid import Solid, KPointInfo
 from grad_dft.utils import DType, default_dtype, DensityFunctional, HartreeFock
-from jax.tree_util import tree_map
-from grad_dft.external import NeuralNumInt
+from grad_dft.external import NeuralNumInt, _nu_chunk
 from grad_dft.external import Functional as ExternalFunctional
-
-from pyscf.pbc import df
-
-import h5py
-from pyscf import cc, dft, scf
-
-from jaxtyping import Array, Scalar, Int, Bool
-from grad_dft.external import _nu_chunk
 
 
 def grid_from_pyscf(grids: Grids, dtype: Optional[DType] = None) -> Grid:
@@ -58,6 +52,7 @@ def grid_from_pyscf(grids: Grids, dtype: Optional[DType] = None) -> Grid:
     coords, weights = to_device_arrays(grids.coords, grids.weights, dtype=dtype)
 
     return Grid(coords, weights)
+
 
 def kpt_info_from_pyscf(kmf: DensityFunctional):
     kpts = kmf.kpts
@@ -76,30 +71,28 @@ def kpt_info_from_pyscf(kmf: DensityFunctional):
         kpts_ir_scaled = kpts.kpts_scaled_ibz
     else:
         # No symmetries used
-    
+
         # Equal weights
 
         # bz2ibz_map = None
         # ibz2bz_map = None
         # kpts_ir_abs = None
         # kpts_ir_scaled = None
-        kpts_abs, kpts_scaled, weights = \
-            to_device_arrays(
-                kpts, 
-                kmf.cell.get_scaled_kpts(kpts),
-                np.ones(shape=(kpts.shape[0],))/kpts.shape[0],
-                dtype=None
-            )
+        kpts_abs, kpts_scaled, weights = to_device_arrays(
+            kpts,
+            kmf.cell.get_scaled_kpts(kpts),
+            np.ones(shape=(kpts.shape[0],)) / kpts.shape[0],
+            dtype=None,
+        )
     return KPointInfo(
         kpts_abs,
-        kpts_scaled, 
+        kpts_scaled,
         weights,
         # bz2ibz_map,
         # ibz2bz_map,
         # kpts_ir_abs,
         # kpts_ir_scaled,
     )
-        
 
 
 def molecule_from_pyscf(
@@ -111,10 +104,12 @@ def molecule_from_pyscf(
     scf_iteration: Scalar = jnp.int32(50),
     chunk_size: Optional[Scalar] = jnp.int32(1024),
     grad_order: Optional[Scalar] = jnp.int32(2),
-) -> Molecule: 
+) -> Molecule:
     if hasattr(mf, "kpts"):
         if not np.array_equal(mf.kpts, np.array([[0.0, 0.0, 0.0]])):
-             raise RuntimeError("Input was periodic with BZ sampling beyond gamma-point only. Use solid_from_pyscf instead.")
+            raise RuntimeError(
+                "Input was periodic with BZ sampling beyond gamma-point only. Use solid_from_pyscf instead."
+            )
     # mf, grids = _maybe_run_kernel(mf, grids)
     grid = grid_from_pyscf(mf.grids, dtype=dtype)
 
@@ -134,7 +129,9 @@ def molecule_from_pyscf(
         fock,
         rep_tensor,
         kpt_info,
-    ) = to_device_arrays(*_package_outputs(mf, mf.grids, scf_iteration, grad_order), dtype=dtype)
+    ) = to_device_arrays(
+        *_package_outputs(mf, mf.grids, scf_iteration, grad_order), dtype=dtype
+    )
 
     atom_index, nuclear_pos = to_device_arrays(
         [elements.ELEMENTS.index(e) for e in mf.mol.elements],
@@ -165,7 +162,9 @@ def molecule_from_pyscf(
 
     spin = jnp.int32(mf.mol.spin)
     charge = jnp.int32(mf.mol.charge)
-    if isinstance(mf.grids, Grids): # check if it's the open boundary grid. Otherwise we have a uniform grid with no level
+    if isinstance(
+        mf.grids, Grids
+    ):  # check if it's the open boundary grid. Otherwise we have a uniform grid with no level
         grid_level = jnp.int32(mf.grids.level)
     else:
         grid_level = None
@@ -199,7 +198,8 @@ def molecule_from_pyscf(
         scf_iteration,
         fock,
     )
-    
+
+
 def solid_from_pyscf(
     kmf: DensityFunctional,
     dtype: Optional[DType] = None,
@@ -213,9 +213,10 @@ def solid_from_pyscf(
     if np.array_equal(kmf.kpts, np.array([[0.0, 0.0, 0.0]])):
         raise RuntimeError("Use molecule_from_pyscf for Gamma point only calculations")
     elif not hasattr(kmf, "cell"):
-        raise RuntimeError("Input was an isolated system. Use molecule_from_pyscf instead.")
-        
-         
+        raise RuntimeError(
+            "Input was an isolated system. Use molecule_from_pyscf instead."
+        )
+
     grid = grid_from_pyscf(kmf.grids, dtype=dtype)
     pyscf_dat = _package_outputs(kmf, kmf.grids, scf_iteration, grad_order)
     kpt_info = pyscf_dat[-1]
@@ -265,7 +266,9 @@ def solid_from_pyscf(
 
     spin = jnp.int32(kmf.mol.spin)
     charge = jnp.int32(kmf.mol.charge)
-    if isinstance(kmf.grids, Grids): # check if it's the open boundary grid. Otherwise we have a uniform grid with no level
+    if isinstance(
+        kmf.grids, Grids
+    ):  # check if it's the open boundary grid. Otherwise we have a uniform grid with no level
         grid_level = jnp.int32(kmf.grids.level)
     else:
         grid_level = None
@@ -399,10 +402,14 @@ def saver(
                 react = file.create_group(f"reaction_{i}")
             react["energy"] = reaction.energy
 
-            for j, molecule in enumerate(list(chain(reaction.reactants, reaction.products))):
+            for j, molecule in enumerate(
+                list(chain(reaction.reactants, reaction.products))
+            ):
                 if molecule.name is not None:
                     mol_group = react.create_group(
-                        "molecule_" + f"".join(chr(num) for num in molecule.name) + f"_{j}"
+                        "molecule_"
+                        + f"".join(chr(num) for num in molecule.name)
+                        + f"_{j}"
                     )
                 else:
                     mol_group = react.create_group(f"molecule_{j}")
@@ -471,13 +478,18 @@ def loader(
                 args = {}
                 for key, value in group.items():
                     if key in ["name", "basis"]:
-                        args[key] = jnp.array([ord(char) for char in str(value[()])], dtype=jnp.int64)
+                        args[key] = jnp.array(
+                            [ord(char) for char in str(value[()])], dtype=jnp.int64
+                        )
                     elif key in ["energy"]:
                         args[key] = jnp.float64(value)
                     elif key in ["scf_iteration", "spin", "charge"]:
                         args[key] = jnp.int64(value)
                     elif key in ["grad_n_ao"]:
-                        args[key] = {int(k): jnp.asarray(v, dtype = jnp.float64) for k, v in value.items()}
+                        args[key] = {
+                            int(k): jnp.asarray(v, dtype=jnp.float64)
+                            for k, v in value.items()
+                        }
                     elif key == "chi":
                         # select the indices from the omegas array and load the corresponding chi matrix
                         if config_omegas is None:
@@ -493,7 +505,11 @@ def loader(
                             ), f"chi tensors for omega list {config_omegas} were not all precomputed in the molecule"
                             indices = [omegas.index(omega) for omega in config_omegas]
                             args[key] = jnp.stack(
-                                [jnp.asarray(value, dtype = jnp.float64)[:, i] for i in indices], axis=1
+                                [
+                                    jnp.asarray(value, dtype=jnp.float64)[:, i]
+                                    for i in indices
+                                ],
+                                axis=1,
                             )
                     else:
                         args[key] = jnp.asarray(value, dtype=jnp.float64)
@@ -516,7 +532,9 @@ def loader(
                 product_numbers = []
 
                 if not training:
-                    name = jnp.array([ord(char) for char in str(grp_name.split("_")[1:])])
+                    name = jnp.array(
+                        [ord(char) for char in str(grp_name.split("_")[1:])]
+                    )
                     energy = jnp.float64(group["energy"])
                 else:
                     name = None
@@ -533,11 +551,15 @@ def loader(
                         if key in ["reactant_numbers", "product_numbers"]:
                             continue
                         elif key in ["name", "basis"]:
-                            args[key] = jnp.array([ord(char) for char in str(value[()])])
+                            args[key] = jnp.array(
+                                [ord(char) for char in str(value[()])]
+                            )
                         elif key in ["energy"]:
                             args[key] = jnp.float64(value)
                         elif key in ["grad_n_ao"]:
-                            args[key] = {int(k): jnp.asarray(v) for k, v in value.items()}
+                            args[key] = {
+                                int(k): jnp.asarray(v) for k, v in value.items()
+                            }
                         elif key == "chi":
                             # select the indices from the omegas array and load the corresponding chi matrix
                             if config_omegas is None:
@@ -551,7 +573,9 @@ def loader(
                                 assert all(
                                     [omega in omegas for omega in config_omegas]
                                 ), f"chi tensors for omega list {config_omegas} were not all precomputed in the molecule"
-                                indices = [omegas.index(omega) for omega in config_omegas]
+                                indices = [
+                                    omegas.index(omega) for omega in config_omegas
+                                ]
                                 args[key] = jnp.stack(
                                     [jnp.asarray(value)[:, i] for i in indices], axis=1
                                 )
@@ -584,8 +608,8 @@ def loader(
 def save_molecule_data(mol_group: h5py.Group, molecule: Molecule):
     r"""Auxiliary function to save all data except for chi"""
 
-    to_numpy = (
-        lambda arr: arr if (isinstance(arr, str) or isinstance(arr, float)) else np.asarray(arr)
+    to_numpy = lambda arr: (
+        arr if (isinstance(arr, str) or isinstance(arr, float)) else np.asarray(arr)
     )
     d = tree_map(to_numpy, molecule.to_dict())
 
@@ -617,19 +641,33 @@ def save_molecule_chi(
     mol = mol_from_Molecule(molecule)
 
     chunks = (
-        (np.ceil(grid_coords.shape[0] / chunk_size).astype(int), 1, 1, 1) if chunk_size else None
+        (np.ceil(grid_coords.shape[0] / chunk_size).astype(int), 1, 1, 1)
+        if chunk_size
+        else None
     )
-    shape = (grid_coords.shape[0], len(omegas), molecule.rdm1.shape[0], molecule.ao.shape[1])
+    shape = (
+        grid_coords.shape[0],
+        len(omegas),
+        molecule.rdm1.shape[0],
+        molecule.ao.shape[1],
+    )
     # Remember that molecule.rdm1.shape[0] represents the spin
 
     if chunk_size is None:
         chunk_size = grid_coords.shape[0]
 
     chi = generate_chi_tensor(
-        molecule.rdm1, molecule.ao, molecule.grid.coords, mol, omegas=omegas, precision=precision
+        molecule.rdm1,
+        molecule.ao,
+        molecule.grid.coords,
+        mol,
+        omegas=omegas,
+        precision=precision,
     )
 
-    mol_group.create_dataset(f"chi", shape=shape, chunks=chunks, dtype="float64", data=chi)
+    mol_group.create_dataset(
+        f"chi", shape=shape, chunks=chunks, dtype="float64", data=chi
+    )
     mol_group.create_dataset(f"omegas", data=omegas)
 
 
@@ -648,9 +686,11 @@ def to_device_arrays(*arrays, dtype: Optional[DType] = None):
             out.append(array)
         elif isinstance(array, Scalar):
             out.append(array)
+        elif array is None:
+            out.append(None)  # or out.append(jnp.nan) ?
         else:
             out.append(jnp.asarray(array))
-
+    # print(out)
     return out
 
 
@@ -700,9 +740,12 @@ def ao_grads(mol: Mole, coords: Array, order=2) -> Dict:
         result[n] = jnp.empty((ao_[0].shape[0], ao_[0].shape[1], 0))
         for c in combinations_with_replacement("xyz", r=n):
             if len(set(c)) == 1:
-                result[n] = jnp.concatenate((result[n], jnp.expand_dims(ao_[i], axis=2)), axis=2)
+                result[n] = jnp.concatenate(
+                    (result[n], jnp.expand_dims(ao_[i], axis=2)), axis=2
+                )
             i += 1
     return result
+
 
 def pbc_ao_grads(cell: Cell, coords: Array, order=2, kpts=None) -> Dict:
     r"""Function to compute nth order crystal atomic orbital grads, for n > 1.
@@ -739,16 +782,19 @@ def pbc_ao_grads(cell: Cell, coords: Array, order=2, kpts=None) -> Dict:
         result[n] = jnp.empty(res_shape)
         for c in combinations_with_replacement("xyz", r=n):
             if len(set(c)) == 1:
-                result[n] = jnp.concatenate((result[n], jnp.expand_dims(ao_[:, i, :, :], axis=3)), axis=3)
+                result[n] = jnp.concatenate(
+                    (result[n], jnp.expand_dims(ao_[:, i, :, :], axis=3)), axis=3
+                )
             i += 1
     return result
 
+
 def calc_eri_with_pyscf(mf, kpts=np.zeros(3)) -> np.ndarray:
     r"""Calculate the ERIs using the method detected from the PySCF mean field object.
-    
+
     Inputs
     ----------
-    
+
     mf:
         PySCF mean field object
     kpts:
@@ -757,21 +803,23 @@ def calc_eri_with_pyscf(mf, kpts=np.zeros(3)) -> np.ndarray:
     Outputs
     ----------
     np.ndarray
-    
+
     The ERIs. Output shape is (nao, nao, nao, nao) for isolated molecules and gamma-point only
     periodic calculations. For full BZ calculations, the output shape is (nkpt, nkpt, nao, nao, nao, nao).
     """
     # Solid or Isolated molecule?
-    if hasattr(mf, "cell"): # Periodic system
-        
+    if hasattr(mf, "cell"):  # Periodic system
+
         # Check for the three density fitting methods. DF is always used for periodic calculations
         if isinstance(mf.with_df, FFTDF):
             density_fitter = FFTDF(mf.cell, kpts=kpts)
-        elif isinstance(mf.with_df, MDF): # Check for MDF before GDF becuase MDF inherits from GDF
+        elif isinstance(
+            mf.with_df, MDF
+        ):  # Check for MDF before GDF becuase MDF inherits from GDF
             density_fitter = MDF(mf.cell, kpts=kpts)
         elif isinstance(mf.with_df, GDF):
             density_fitter = GDF(mf.cell, kpts=kpts)
-        
+
         # Calculate the Periodic ERI's.
         if np.array_equal(kpts, np.zeros(3)):
             # Assume Gamma point only
@@ -786,23 +834,22 @@ def calc_eri_with_pyscf(mf, kpts=np.zeros(3)) -> np.ndarray:
             eri = np.empty(shape=(nkpt, nkpt, nao, nao, nao, nao), dtype=np.complex128)
             for ikpt, jkpt in product(range(nkpt), range(nkpt)):
                 k_quartet = np.array([kpts[ikpt], kpts[ikpt], kpts[jkpt], kpts[jkpt]])
-                eri_kquartet =\
-                    density_fitter.get_eri(compact=False, kpts=k_quartet).reshape(nao, nao, nao, nao)
+                eri_kquartet = density_fitter.get_eri(
+                    compact=False, kpts=k_quartet
+                ).reshape(nao, nao, nao, nao)
                 eri[ikpt, jkpt, :, :, :, :] = eri_kquartet
-                
-    else: # Isolated system
+
+    else:  # Isolated system
         try:
             _ = mf.with_df
-        except(AttributeError):
-            eri =  mf.mol.intor("int2e")
+        except AttributeError:
+            eri = mf.mol.intor("int2e")
             return eri
         # Use default DF method when DF is used on molecules
         density_fitter = df.DF(mf.mol)
         eri_compressed = density_fitter.get_eri()
         eri = restore(1, eri_compressed, mf.mol.nao_nr())
     return eri
-        
-
 
 
 def _package_outputs(
@@ -810,18 +857,20 @@ def _package_outputs(
     grids: Optional[Grids] = None,
     scf_iteration: Scalar = jnp.int32(50),
     grad_order: Scalar = jnp.int32(2),
-):    
+):
     if scf_iteration != 0:
         rdm1 = mf.make_rdm1(mf.mo_coeff, mf.mo_occ)
     else:
-        rdm1 = mf.get_init_guess(mf.mol, mf.init_guess) 
-    
-    # Depending on the shapes of arrays and the type of PySCF mean field object passed, 
+        rdm1 = mf.get_init_guess(mf.mol, mf.init_guess)
+
+    # Depending on the shapes of arrays and the type of PySCF mean field object passed,
     # the correct way to process data is now inferred.
-    
+
     # Restricted (non-spin polarized), open boundary conditions
     if rdm1.ndim == 2 and not hasattr(mf, "cell"):
-        ao_and_1deriv = numint.eval_ao(mf.mol, grids.coords, deriv=1)  # , non0tab=grids.non0tab)
+        ao_and_1deriv = numint.eval_ao(
+            mf.mol, grids.coords, deriv=1
+        )  # , non0tab=grids.non0tab)
         ao = ao_and_1deriv[0]
         grad_ao = ao_and_1deriv[1:4].transpose(1, 2, 0)
         grad_n_ao = ao_grads(mf.mol, jnp.array(mf.grids.coords), order=grad_order)
@@ -837,16 +886,18 @@ def _package_outputs(
         mo_energy = np.stack([half_mo_energy, half_mo_energy], axis=0)
         mo_occ = np.stack([half_mo_occ, half_mo_occ], axis=0)
         vj = 2 * mf.get_j(
-        mf.mol, rdm1, hermi=1
+            mf.mol, rdm1, hermi=1
         )  # The 2 is to compensate for the /2 in the definition of the density matrix
         dm = mf.make_rdm1(mf.mo_coeff, mf.mo_occ)
         fock = np.stack([h1e, h1e], axis=0) + mf.get_veff(mf.mol, dm)
         rep_tensor = calc_eri_with_pyscf(mf)
         kpt_info = None
-        
+
     # Unrestricted (spin polarized), open boundary conditions
     elif rdm1.ndim == 3 and not hasattr(mf, "cell"):
-        ao_and_1deriv = numint.eval_ao(mf.mol, grids.coords, deriv=1)  # , non0tab=grids.non0tab)
+        ao_and_1deriv = numint.eval_ao(
+            mf.mol, grids.coords, deriv=1
+        )  # , non0tab=grids.non0tab)
         ao = ao_and_1deriv[0]
         grad_ao = ao_and_1deriv[1:4].transpose(1, 2, 0)
         grad_n_ao = ao_grads(mf.mol, jnp.array(mf.grids.coords), order=grad_order)
@@ -862,18 +913,22 @@ def _package_outputs(
         fock = np.stack([h1e, h1e], axis=0) + mf.get_veff(mf.mol, dm)
         rep_tensor = calc_eri_with_pyscf(mf)
         kpt_info = None
-     
-    # Restricted (non-spin polarized), periodic boundary conditions, full BZ sampling  
+
+    # Restricted (non-spin polarized), periodic boundary conditions, full BZ sampling
     elif rdm1.ndim == 3 and hasattr(mf, "cell") and rdm1.shape[0] != 1:
-        ao_and_1deriv = pbc_numint.eval_ao_kpts(mf.cell, grids.coords, kpts=mf.kpts, deriv=1)
+        ao_and_1deriv = pbc_numint.eval_ao_kpts(
+            mf.cell, grids.coords, kpts=mf.kpts, deriv=1
+        )
         ao_and_1deriv = np.asarray(ao_and_1deriv)
         ao = ao_and_1deriv[:, 0, :, :]
         grad_ao = ao_and_1deriv[:, 1:4, :, :].transpose(0, 2, 3, 1)
-        grad_n_ao = pbc_ao_grads(mf.cell, jnp.array(mf.grids.coords), order=grad_order, kpts=mf.kpts)
+        grad_n_ao = pbc_ao_grads(
+            mf.cell, jnp.array(mf.grids.coords), order=grad_order, kpts=mf.kpts
+        )
         # grad_n_ao = ao_grads(mf.mol, jnp.array(mf.grids.coords), order=grad_order)
         s1e = mf.get_ovlp(mf.mol)
         h1e = mf.get_hcore(mf.mol)
-        
+
         half_dm = rdm1 / 2
         half_mo_coeff = mf.mo_coeff
         half_mo_energy = mf.mo_energy
@@ -883,46 +938,50 @@ def _package_outputs(
         mo_coeff = np.stack([half_mo_coeff, half_mo_coeff], axis=0)
         mo_energy = np.stack([half_mo_energy, half_mo_energy], axis=0)
         mo_occ = np.stack([half_mo_occ, half_mo_occ], axis=0)
-        
+
         vj = 2 * mf.get_j(
-        mf.mol, rdm1, hermi=1
+            mf.mol, rdm1, hermi=1
         )  # The 2 is to compensate for the /2 in the definition of the density matrix
         dm = mf.make_rdm1(mf.mo_coeff, mf.mo_occ)
         fock = np.stack([h1e, h1e], axis=0) + mf.get_veff(mf.mol, dm)
-        
+
         kpt_info = kpt_info_from_pyscf(mf)
         # Compute ERIs for all pairs of k-points. Needed for Coulomb energy calculation
         rep_tensor = calc_eri_with_pyscf(mf, kpts=mf.kpts)
-        
-    # Unrestricted (spin polarized), periodic boundary conditions, full BZ sampling     
+
+    # Unrestricted (spin polarized), periodic boundary conditions, full BZ sampling
     elif rdm1.ndim == 4 and hasattr(mf, "cell") and rdm1.shape[1] != 1:
-        
-        ao_and_1deriv = pbc_numint.eval_ao_kpts(mf.cell, grids.coords, kpts=mf.kpts, deriv=1)
+
+        ao_and_1deriv = pbc_numint.eval_ao_kpts(
+            mf.cell, grids.coords, kpts=mf.kpts, deriv=1
+        )
         ao_and_1deriv = np.asarray(ao_and_1deriv)
         ao = ao_and_1deriv[:, 0, :, :]
         grad_ao = ao_and_1deriv[:, 1:4, :, :].transpose(0, 2, 3, 1)
-        grad_n_ao = pbc_ao_grads(mf.cell, jnp.array(mf.grids.coords), order=grad_order, kpts=mf.kpts)
-        
+        grad_n_ao = pbc_ao_grads(
+            mf.cell, jnp.array(mf.grids.coords), order=grad_order, kpts=mf.kpts
+        )
+
         s1e = mf.get_ovlp(mf.mol)
         h1e = mf.get_hcore(mf.mol)
         mo_coeff = np.stack(mf.mo_coeff, axis=0)
         mo_energy = np.stack(mf.mo_energy, axis=0)
         mo_occ = np.stack(mf.mo_occ, axis=0)
-        
-        vj = 2 * mf.get_j(
-        mf.mol, rdm1, hermi=1
-        )
-        
+
+        vj = 2 * mf.get_j(mf.mol, rdm1, hermi=1)
+
         dm = mf.make_rdm1(mf.mo_coeff, mf.mo_occ)
         fock = np.stack([h1e, h1e], axis=0) + mf.get_veff(mf.mol, dm)
-        
+
         kpt_info = kpt_info_from_pyscf(mf)
         # Compute ERIs for all pairs of k-points. Needed for Coulomb energy calculation
         rep_tensor = calc_eri_with_pyscf(mf, kpts=mf.kpts)
-    
+
     # Restricted (non-spin polarized), periodic boundary conditions, gamma point only
     elif rdm1.ndim == 3 and hasattr(mf, "cell") and rdm1.shape[0] == 1:
-        ao_and_1deriv = pbc_numint.eval_ao_kpts(mf.cell, grids.coords, kpts=mf.kpts, deriv=1)
+        ao_and_1deriv = pbc_numint.eval_ao_kpts(
+            mf.cell, grids.coords, kpts=mf.kpts, deriv=1
+        )
         ao_and_1deriv = np.asarray(ao_and_1deriv)
         ao = ao_and_1deriv[:, 0, :, :]
         grad_ao = ao_and_1deriv[:, 1:4, :, :].transpose(0, 2, 3, 1)
@@ -932,7 +991,7 @@ def _package_outputs(
         grad_ao = np.squeeze(grad_ao, axis=0)
         for key in grad_n_ao.keys():
             grad_n_ao[key] = np.squeeze(grad_n_ao[key], axis=0)
-        
+
         s1e = mf.get_ovlp(mf.mol)
         s1e = np.squeeze(s1e, axis=0)
         h1e = mf.get_hcore(mf.mol)
@@ -940,7 +999,7 @@ def _package_outputs(
         # rdm1 = np.squeeze(rdm1, axis=1)
         mo_coeff = np.squeeze(mf.mo_coeff, axis=0)
         mo_occ = np.squeeze(mf.mo_occ, axis=0)
-        
+
         half_dm = rdm1 / 2
         half_mo_coeff = mo_coeff
         half_mo_energy = mf.mo_energy
@@ -948,15 +1007,14 @@ def _package_outputs(
 
         rdm1 = np.stack([half_dm, half_dm], axis=0)
         vj = 2 * mf.get_j(
-        mf.mol, rdm1, hermi=1
+            mf.mol, rdm1, hermi=1
         )  # The 2 is to compensate for the /2 in the definition of the density matrix
         rdm1 = np.squeeze(rdm1, axis=1)
         mo_coeff = np.stack([half_mo_coeff, half_mo_coeff], axis=0)
         mo_energy = np.stack([half_mo_energy, half_mo_energy], axis=0)
         mo_energy = np.squeeze(mo_energy, axis=1)
         mo_occ = np.stack([half_mo_occ, half_mo_occ], axis=0)
-        
-        
+
         dm = mf.make_rdm1(mf.mo_coeff, mf.mo_occ)
         fock = np.stack([h1e, h1e], axis=0) + mf.get_veff(mf.mol, dm)
         fock = np.squeeze(fock, axis=1)
@@ -964,10 +1022,12 @@ def _package_outputs(
         h1e = np.squeeze(h1e, axis=0)
         rep_tensor = calc_eri_with_pyscf(mf)
         kpt_info = None
-        
-    # Unrestricted (spin polarized), periodic boundary conditions, gamma point only    
+
+    # Unrestricted (spin polarized), periodic boundary conditions, gamma point only
     elif rdm1.ndim == 4 and hasattr(mf, "cell") and rdm1.shape[1] == 1:
-        ao_and_1deriv = pbc_numint.eval_ao_kpts(mf.cell, grids.coords, kpts=mf.kpts, deriv=1)
+        ao_and_1deriv = pbc_numint.eval_ao_kpts(
+            mf.cell, grids.coords, kpts=mf.kpts, deriv=1
+        )
         ao_and_1deriv = np.asarray(ao_and_1deriv)
         ao = ao_and_1deriv[:, 0, :, :]
         grad_ao = ao_and_1deriv[:, 1:4, :, :].transpose(0, 2, 3, 1)
@@ -983,19 +1043,19 @@ def _package_outputs(
         h1e = mf.get_hcore(mf.mol)
         # h1e = np.squeeze(h1e, axis=0)
         vj = 2 * mf.get_j(
-        mf.mol, rdm1, hermi=1
+            mf.mol, rdm1, hermi=1
         )  # The 2 is to compensate for the /2 in the definition of the density matrix
         # Collapse the redundant extra dimension from k-points: gamma only
-        
+
         rdm1 = np.squeeze(rdm1, axis=1)
         mo_coeff = np.squeeze(mf.mo_coeff, axis=1)
         mo_occ = np.squeeze(mf.mo_occ, axis=1)
-        
+
         mo_coeff = np.stack(mo_coeff, axis=0)
         mo_energy = np.stack(mf.mo_energy, axis=0)
         mo_energy = np.squeeze(mo_energy, axis=1)
         mo_occ = np.stack(mo_occ, axis=1).T
-        
+
         dm = mf.make_rdm1(mf.mo_coeff, mf.mo_occ)
         fock = np.stack([h1e, h1e], axis=0) + mf.get_veff(mf.mol, dm)
         fock = np.squeeze(fock, axis=1)
@@ -1003,7 +1063,7 @@ def _package_outputs(
         h1e = np.squeeze(h1e, axis=0)
         rep_tensor = calc_eri_with_pyscf(mf)
         kpt_info = None
-        
+
     else:
         raise RuntimeError(
             f"Invalid density matrix shape. Got {rdm1.shape} for AO shape {ao.shape}"
@@ -1026,7 +1086,7 @@ def _package_outputs(
         s1e,
         fock,
         rep_tensor,
-        kpt_info
+        kpt_info,
     )
 
 
@@ -1113,7 +1173,9 @@ def generate_chi_tensor(
     chi = []
     for omega in omegas:
         chi_omega = []
-        for chunk_index, end_index, nu_chunk in _nu_chunk(mol, grid_coords, omega, chunk_size):
+        for chunk_index, end_index, nu_chunk in _nu_chunk(
+            mol, grid_coords, omega, chunk_size
+        ):
             chi_chunk = vmap(chi_make, in_axes=(None, 0, 0), out_axes=0)(
                 rdm1, ao[chunk_index:end_index], nu_chunk
             )

@@ -12,27 +12,26 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import time
+from typing import Callable, Tuple, Optional, Union
+from functools import partial, reduce
+
 import jax
+import optax
 from jax import jit, numpy as jnp
-from jax.lax import Precision
+from jax.lax import Precision, cond, fori_loop
 from jax.scipy.special import erfc
 from jax.scipy.optimize import minimize as scipyminimize
 from flax import struct
-import optax
-from jax.lax import cond, fori_loop
-
-import sys
-
-from typing import Callable, Tuple, Optional, Union
-from functools import partial, reduce
-import time
 from scipy.optimize import bisect
+from typeguard import typechecked as typechecker
+from jaxtyping import PyTree, Array, Scalar, Float, Int, jaxtyped
 
 from grad_dft import (
     Molecule,
-    Solid, 
-    abs_clip, 
-    make_rdm1, 
+    Solid,
+    abs_clip,
+    make_rdm1,
     Functional,
     energy_predictor,
 )
@@ -48,8 +47,6 @@ from grad_dft.utils import (
 from grad_dft.utils.types import (
     Hartree2kcalmol,
 )
-from typeguard import typechecked
-from jaxtyping import PyTree, Array, Scalar, Float, Int, jaxtyped
 
 
 ######## Test kernel ########
@@ -83,7 +80,9 @@ def test_kernel(tx: optax.GradientTransformation, loss: Callable) -> Callable:
 
     return kernel
 
+
 ######## Non self-consistent iterator ################
+
 
 def non_scf_predictor(
     functional: Functional,
@@ -103,7 +102,10 @@ def non_scf_predictor(
     Callable
     """
     compute_energy = energy_predictor(functional, chunk_size=chunk_size, **kwargs)
-    def non_scf_predictor(params: PyTree, atoms: Union[Molecule, Solid], *args) -> Union[Molecule, Solid]:
+
+    def non_scf_predictor(
+        params: PyTree, atoms: Union[Molecule, Solid], *args
+    ) -> Union[Molecule, Solid]:
         r"""Calculates the total energy at a fixed density non-self consistently.
 
         Main parameters
@@ -116,17 +118,18 @@ def non_scf_predictor(
         Returns
         ---------
         Molecule
-            A Grad-DFT Molecule or Solid object with updated attributes 
+            A Grad-DFT Molecule or Solid object with updated attributes
         """
         predicted_e, fock = compute_energy(params, atoms, *args)
         atoms = atoms.replace(fock=fock)
         atoms = atoms.replace(energy=predicted_e)
         return atoms
-    
+
     return non_scf_predictor
 
 
 ######## Test scf loop and orbital optimizers ########
+
 
 def simple_scf_loop(
     functional: Functional,
@@ -156,7 +159,9 @@ def simple_scf_loop(
 
     compute_energy = energy_predictor(functional, chunk_size=chunk_size, **kwargs)
 
-    def simple_scf_iterator(params: PyTree, atoms: Union[Molecule, Solid], clip_cte = 1e-30, *args) -> Union[Molecule, Solid]:
+    def simple_scf_iterator(
+        params: PyTree, atoms: Union[Molecule, Solid], clip_cte=1e-30, *args
+    ) -> Union[Molecule, Solid]:
         r"""
         Implements a scf loop for a Molecule and a functional implicitly defined compute_energy with
         parameters params
@@ -178,7 +183,7 @@ def simple_scf_loop(
         # predicted_e, fock = compute_energy(params, molecule, *args)
         # fock = abs_clip(fock, clip_cte)
         # fock = molecule.fock
-        old_e = 100000 # we should set the energy in a molecule object really
+        old_e = 100000  # we should set the energy in a molecule object really
         for cycle in range(cycles):
             # Convergence criterion is energy difference (default 1) kcal/mol and norm of gradient of orbitals < g_conv
             start_time = time.time()
@@ -205,21 +210,24 @@ def simple_scf_loop(
             if cycle == 0:
                 old_rdm1 = atoms.make_rdm1()
             else:
-                rdm1 = (1 - mixing_factor)*old_rdm1 + mixing_factor*atoms.make_rdm1()
+                rdm1 = (
+                    1 - mixing_factor
+                ) * old_rdm1 + mixing_factor * atoms.make_rdm1()
                 atoms = atoms.replace(rdm1=rdm1)
                 old_rdm1 = rdm1
-            
+
             computed_charge = jnp.einsum("r,rs->", atoms.grid.weights, atoms.density())
             # This assertion was removed because the forward pass number of electrons is correct, but in backward pass, this assertion will fail.
             # This doesn't mean there is an error though. Just because of batching in backwrd pass.
-            assert jnp.isclose(
-                nelectron, computed_charge, atol=1e-3
-            ), "Total charge is not conserved. given electrons: %.3f, computed electrons: %.3f" % (nelectron, computed_charge)
+            assert jnp.isclose(nelectron, computed_charge, atol=1e-3), (
+                "Total charge is not conserved. given electrons: %.3f, computed electrons: %.3f"
+                % (nelectron, computed_charge)
+            )
 
             exc_start_time = time.time()
 
             predicted_e, fock = compute_energy(params, atoms, *args)
-                        
+
             exc_time = time.time()
 
             if verbose > 2:
@@ -254,7 +262,9 @@ def simple_scf_loop(
     return simple_scf_iterator
 
 
-def diff_simple_scf_loop(functional: Functional, cycles: int = 25, mixing_factor: float = 0.4, **kwargs) -> Callable:
+def diff_simple_scf_loop(
+    functional: Functional, cycles: int = 25, mixing_factor: float = 0.4, **kwargs
+) -> Callable:
     r"""
     Creates an scf_iterator object that can be called to implement a self-consistent loop using linear mixing.
     intented to be jax.jit compatible (fully self-differentiable).
@@ -274,11 +284,8 @@ def diff_simple_scf_loop(functional: Functional, cycles: int = 25, mixing_factor
 
     @jit
     def simple_scf_jitted_iterator(
-        params: PyTree, 
-        atoms: Union[Molecule, Solid], 
-        *args
+        params: PyTree, atoms: Union[Molecule, Solid], *args
     ) -> Union[Molecule, Solid]:
-
         r"""
         Implements a scf loop intented for use in a jax.jit compiled function (training loop).
         If you are looking for a more flexible but not differentiable scf loop, see evaluate.py scf_loop.
@@ -300,14 +307,13 @@ def diff_simple_scf_loop(functional: Functional, cycles: int = 25, mixing_factor
         SCF training loop not implemented for (range-separated) exact-exchange functionals.
         Doing so would require a differentiable way of recomputing the chi tensor.
         """
-        
+
         old_e = jnp.inf
         norm_gorb = jnp.inf
 
         predicted_e, fock = compute_energy(params, atoms, *args)
         atoms = atoms.replace(fock=fock)
         atoms = atoms.replace(energy=predicted_e)
-        
 
         state = (atoms, predicted_e, old_e, norm_gorb)
 
@@ -328,8 +334,8 @@ def diff_simple_scf_loop(functional: Functional, cycles: int = 25, mixing_factor
             atoms = atoms.replace(mo_occ=mo_occ)
 
             # Update the density matrix with linear mixing
-            unmixed_new_rdm1 =  atoms.make_rdm1()
-            rdm1 = (1 - mixing_factor)*old_rdm1 + mixing_factor*unmixed_new_rdm1
+            unmixed_new_rdm1 = atoms.make_rdm1()
+            rdm1 = (1 - mixing_factor) * old_rdm1 + mixing_factor * unmixed_new_rdm1
             atoms = atoms.replace(rdm1=rdm1)
 
             # Compute the new energy and Fock matrix
@@ -400,11 +406,16 @@ def scf_loop(
         Molecule
         """
         if isinstance(molecule, Solid):
-            raise NotImplementedError("Solids with full BZ zampling not yet supported. Use simple_scf_loop or diff_simple_scf_loop instead.")
+            raise NotImplementedError(
+                "Solids with full BZ zampling not yet supported. Use simple_scf_loop or diff_simple_scf_loop instead."
+            )
         # Needed to be able to update the chi tensor
         mol = mol_from_Molecule(molecule)
         _, mf = process_mol(
-            mol, compute_energy=False, grid_level=int(molecule.grid_level), training=False
+            mol,
+            compute_energy=False,
+            grid_level=int(molecule.grid_level),
+            training=False,
         )
 
         old_e = jnp.inf
@@ -416,7 +427,9 @@ def scf_loop(
 
         # Initialize DIIS
         A = jnp.identity(molecule.s1e.shape[0])
-        diis = Diis(overlap_matrix=molecule.s1e, A=A, max_diis=10, diis_method=diis_method)
+        diis = Diis(
+            overlap_matrix=molecule.s1e, A=A, max_diis=10, diis_method=diis_method
+        )
         diis_data = (
             jnp.empty((0, 2, A.shape[0], A.shape[0])),
             jnp.empty((0, 2, A.shape[0], A.shape[0])),
@@ -447,8 +460,12 @@ def scf_loop(
 
             if abs(level_shift_factor[0]) + abs(level_shift_factor[1]) > 1e-4:
                 fock = (
-                    level_shift(molecule.s1e, molecule.rdm1[0], fock[0], level_shift_factor[0]),
-                    level_shift(molecule.s1e, molecule.rdm1[1], fock[1], level_shift_factor[1]),
+                    level_shift(
+                        molecule.s1e, molecule.rdm1[0], fock[0], level_shift_factor[0]
+                    ),
+                    level_shift(
+                        molecule.s1e, molecule.rdm1[1], fock[1], level_shift_factor[1]
+                    ),
                 )
 
             # Diagonalize Fock matrix
@@ -501,7 +518,11 @@ def scf_loop(
             molecule = molecule.replace(rdm1=rdm1)
 
             computed_charge = jnp.einsum(
-                "r,ra,rb,sab->", molecule.grid.weights, molecule.ao, molecule.ao, molecule.rdm1
+                "r,ra,rb,sab->",
+                molecule.grid.weights,
+                molecule.ao,
+                molecule.ao,
+                molecule.rdm1,
             )
             assert jnp.isclose(
                 nelectron, computed_charge, atol=1e-3
@@ -636,15 +657,14 @@ def mol_orb_optimizer(
 
     compute_energy = energy_predictor(fxc, chunk_size=chunk_size, **kwargs)
 
-    @jaxtyped
-    @typechecked
+    @jaxtyped(typechecker=typechecker)
     @partial(jax.value_and_grad, argnums=0)
     def molecule_orbitals_iterator(
         W: Float[Array, "spin orbitals orbitals"],
-        D: Float[Array, "orbitals orbitals"], 
-        params: PyTree, 
-        molecule: Molecule, 
-        *args
+        D: Float[Array, "orbitals orbitals"],
+        params: PyTree,
+        molecule: Molecule,
+        *args,
     ) -> Tuple[Scalar, Float[Array, "spin orbitals orbitals"]]:
         r"""
         Predicted energy and gradients for a molecule generated from W.
@@ -690,7 +710,11 @@ def mol_orb_optimizer(
         nelectron = molecule.atom_index.sum() - molecule.charge
 
         computed_charge = jnp.einsum(
-            "r,ra,rb,sab->", molecule.grid.weights, molecule.ao, molecule.ao, molecule.rdm1
+            "r,ra,rb,sab->",
+            molecule.grid.weights,
+            molecule.ao,
+            molecule.ao,
+            molecule.rdm1,
         )
         # assert jnp.isclose(nelectron, computed_charge, atol = 1e-3), "Total charge is not conserved"
 
@@ -698,11 +722,7 @@ def mol_orb_optimizer(
         predicted_e, _ = compute_energy(params, molecule, *args)
         return predicted_e
 
-    def neural_iterator(
-            params: PyTree,
-            molecule: Molecule, 
-            *args
-        ) -> Molecule:
+    def neural_iterator(params: PyTree, molecule: Molecule, *args) -> Molecule:
         r"""
         Implements an orbital optimizer.
 
@@ -717,7 +737,9 @@ def mol_orb_optimizer(
         molecule: Molecule
         """
         if isinstance(molecule, Solid):
-            raise NotImplementedError("Solids with full BZ zampling not yet supported. Use simple_scf_loop instead.")
+            raise NotImplementedError(
+                "Solids with full BZ zampling not yet supported. Use simple_scf_loop instead."
+            )
         old_e = jnp.inf
         cycle = 0
 
@@ -743,7 +765,9 @@ def mol_orb_optimizer(
         # Q_ = jnp.einsum('sji,jk,kl->sil', C, v, jnp.diag(jnp.sqrt(w))).real # C transposed
         # assert jnp.allclose(Q, Q_)
 
-        I = jnp.einsum("sji,jk,skl->sil", C, molecule.s1e, C)  # The first C is transposed
+        I = jnp.einsum(
+            "sji,jk,skl->sil", C, molecule.s1e, C
+        )  # The first C is transposed
         # stack = jnp.stack((jnp.identity(I.shape[1]),jnp.identity(I.shape[1])))
         # assert jnp.allclose(I, stack)
 
@@ -758,7 +782,9 @@ def mol_orb_optimizer(
             start_time = time.time()
             old_e = predicted_e
 
-            predicted_e, grads = molecule_orbitals_iterator(W, D, params, molecule, *args)
+            predicted_e, grads = molecule_orbitals_iterator(
+                W, D, params, molecule, *args
+            )
 
             updates, opt_state = tx.update(grads, opt_state, W)
             W = optax.apply_updates(W, updates)
@@ -781,10 +807,7 @@ def mol_orb_optimizer(
 
 
 def jitted_mol_orb_optimizer(
-    functional: Functional,
-    tx: Optimizer,
-    cycles: int = 500,
-    **kwargs
+    functional: Functional, tx: Optimizer, cycles: int = 500, **kwargs
 ) -> Callable:
     r"""
     Creates a jittable orbital_optimizer object that can be called to optimize the density matrix and minimize the energy.
@@ -819,15 +842,14 @@ def jitted_mol_orb_optimizer(
 
     compute_energy = energy_predictor(functional, **kwargs)
 
-    @jaxtyped
-    @typechecked
+    @jaxtyped(typechecker=typechecker)
     @partial(jax.value_and_grad, argnums=0)
     def molecule_orbitals_energy(
         W: Float[Array, "spin orbitals orbitals"],
-        D: Float[Array, "orbitals orbitals"], 
-        params: PyTree, 
-        molecule: Molecule, 
-        *args
+        D: Float[Array, "orbitals orbitals"],
+        params: PyTree,
+        molecule: Molecule,
+        *args,
     ) -> Tuple[Scalar, Float[Array, "spin orbitals orbitals"]]:
         r"""
         Predicted energy and gradients for a molecule generated from W.
@@ -868,11 +890,7 @@ def jitted_mol_orb_optimizer(
         return predicted_e
 
     @jit
-    def neural_iterator(
-        params: PyTree,
-        molecule: Molecule,
-        *args
-    ) -> Molecule:
+    def neural_iterator(params: PyTree, molecule: Molecule, *args) -> Molecule:
         r"""
         Implements an jit-compiled orbital optimizer.
 
@@ -890,7 +908,9 @@ def jitted_mol_orb_optimizer(
 
         w, v = jnp.linalg.eigh(molecule.s1e)
         D = (jnp.diag(jnp.sqrt(1 / w)) @ v.T).real
-        Q = jnp.einsum("sji,jk->sik", molecule.mo_coeff, jnp.linalg.inv(D))  # C transposed
+        Q = jnp.einsum(
+            "sji,jk->sik", molecule.mo_coeff, jnp.linalg.inv(D)
+        )  # C transposed
         W = Q
 
         opt_state = tx.init(W)
@@ -907,7 +927,7 @@ def jitted_mol_orb_optimizer(
         final_state = fori_loop(0, cycles, body_fun=loop_body, init_val=state)
         W, opt_state, predicted_e = final_state
 
-        molecule = molecule.replace(energy = predicted_e)
+        molecule = molecule.replace(energy=predicted_e)
 
         return molecule
 
@@ -932,14 +952,9 @@ def diff_scf_loop(functional: Functional, cycles: int = 25, **kwargs) -> Callabl
 
     compute_energy = energy_predictor(functional, chunk_size=None, **kwargs)
 
-    @jaxtyped
-    @typechecked
+    @jaxtyped(typechecker=typechecker)
     @jit
-    def scf_jitted_iterator(
-        params: PyTree, 
-        molecule: Molecule, 
-        *args
-    ) -> Molecule:
+    def scf_jitted_iterator(params: PyTree, molecule: Molecule, *args) -> Molecule:
         r"""
         Implements a scf loop intented for use in a jax.jit compiled function (training loop).
         If you are looking for a more flexible but not differentiable scf loop, see evaluate.py scf_loop.
@@ -1029,11 +1044,10 @@ def diff_scf_loop(functional: Functional, cycles: int = 25, **kwargs) -> Callabl
         state = (molecule, predicted_e, old_e, norm_gorb, diis_data)
         state = loop_body(0, state)
         molecule, predicted_e, _, _, _ = final_state
-        
+
         # Ensure molecule is fully updated
         molecule = molecule.replace(energy=predicted_e)
         return molecule
-
 
     return scf_jitted_iterator
 
@@ -1136,7 +1150,9 @@ class JittableDiis:
             lambda density_vector, density_matrix: jnp.concatenate(
                 (density_vector, jnp.expand_dims(density_matrix, axis=0)), axis=0
             )[1:],
-            lambda density_vector, density_matrix: density_vector.at[cycle].set(density_matrix),
+            lambda density_vector, density_matrix: density_vector.at[cycle].set(
+                density_matrix
+            ),
             density_vector,
             density_matrix,
         )
@@ -1172,10 +1188,14 @@ class JittableDiis:
     def cdiis_minimize(self, error_vector, cycle):
         # Find the coefficients x that solve B @ x = C with B and C defined below
         B = jnp.zeros((2, len(error_vector) + 1, len(error_vector) + 1))
-        B = B.at[:, 1:, 1:].set(jnp.einsum("iskl,jskl->sij", error_vector, error_vector))
+        B = B.at[:, 1:, 1:].set(
+            jnp.einsum("iskl,jskl->sij", error_vector, error_vector)
+        )
 
         def assign_values(i, B):
-            value = cond(jnp.less_equal(i, cycle), lambda _: 1.0, lambda _: 0.0, operand=None)
+            value = cond(
+                jnp.less_equal(i, cycle), lambda _: 1.0, lambda _: 0.0, operand=None
+            )
             B = B.at[:, 0, i + 1].set(value)  # Make 0 if i > cycle, else 1
             B = B.at[:, i + 1, 0].set(value)  # Make 0 if i > cycle, else 1
             return B
@@ -1183,9 +1203,9 @@ class JittableDiis:
         def assign_values_diag(i, B):
             value = cond(
                 jnp.less_equal(i, cycle),
-                lambda error_vector: jnp.einsum("iskl,jskl->sij", error_vector, error_vector)[
-                    :, i, i
-                ],
+                lambda error_vector: jnp.einsum(
+                    "iskl,jskl->sij", error_vector, error_vector
+                )[:, i, i],
                 lambda _: jnp.array([1.0, 1.0]),
                 error_vector,
             )
@@ -1307,8 +1327,12 @@ class Diis:
         density_vector = jnp.concatenate(
             (density_vector, jnp.expand_dims(density_matrix, axis=0)), axis=0
         )
-        fock_vector = jnp.concatenate((fock_vector, jnp.expand_dims(fock_matrix, axis=0)), axis=0)
-        energy_vector = jnp.concatenate((energy_vector, jnp.expand_dims(energy, axis=0)), axis=0)
+        fock_vector = jnp.concatenate(
+            (fock_vector, jnp.expand_dims(fock_matrix, axis=0)), axis=0
+        )
+        energy_vector = jnp.concatenate(
+            (energy_vector, jnp.expand_dims(energy, axis=0)), axis=0
+        )
 
         if len(error_vector) > self.max_diis:
             error_vector = error_vector[1:]
@@ -1357,7 +1381,9 @@ class Diis:
                 and (energy_vector[-1] - energy_vector[-2]) / (energy_vector[-2])
                 >= self.adiis2_threshold
             ):
-                x, _ = self.adiis_minimize(density_vector, fock_vector, cycle % self.max_diis)
+                x, _ = self.adiis_minimize(
+                    density_vector, fock_vector, cycle % self.max_diis
+                )
 
             F = jnp.einsum("i,isjk->sjk", x, fock_vector)
             return F, diis_data
@@ -1365,7 +1391,9 @@ class Diis:
     def cdiis_minimize(self, error_vector):
         # Find the coefficients x that solve B @ x = C with B and C defined below
         B = jnp.zeros((2, len(error_vector) + 1, len(error_vector) + 1))
-        B = B.at[:, 1:, 1:].set(jnp.einsum("iskl,jskl->sij", error_vector, error_vector))
+        B = B.at[:, 1:, 1:].set(
+            jnp.einsum("iskl,jskl->sij", error_vector, error_vector)
+        )
         B = B.at[:, 0, 1:].set(1)
         B = B.at[:, 1:, 0].set(1)
 
@@ -1424,7 +1452,9 @@ class Diis:
             c = x**2 / (x**2).sum()
             return jnp.einsum("i,i", c, energy_vector) - jnp.einsum("i,ij,j", c, df, c)
 
-        res = scipyminimize(costf, jnp.ones(energy_vector.size), method="BFGS", tol=1e-9)
+        res = scipyminimize(
+            costf, jnp.ones(energy_vector.size), method="BFGS", tol=1e-9
+        )
         return (res.x**2) / (res.x**2).sum(), res.fun
 
     def adiis_minimize(self, density_vector, fock_vector, idnewest):
@@ -1476,7 +1506,7 @@ class Diis:
 
 def damping(s, d, f, factor):
     r"""Copied from pyscf.scf.hf.damping
-    
+
     # Copyright 2014-2018 The PySCF Developers. All Rights Reserved.
     #
     # Licensed under the Apache License, Version 2.0 (the "License");

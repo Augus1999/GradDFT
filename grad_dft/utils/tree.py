@@ -33,7 +33,9 @@ def tree_isfinite(tree: PyTree) -> PyTree:
 def tree_randn_like(tree: PyTree, key: Key) -> PyTree:
     leaves, treedef = tree_flatten(tree)
     keys = jax.random.split(key, len(leaves))
-    return treedef.unflatten([jax.random.normal(k, l.shape, l.dtype) for k, l in zip(keys, leaves)])
+    return treedef.unflatten(
+        [jax.random.normal(k, l.shape, l.dtype) for k, l in zip(keys, leaves)]
+    )
 
 
 def tree_func(f: Callable) -> Callable:

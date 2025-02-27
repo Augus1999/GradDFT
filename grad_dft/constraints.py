@@ -11,7 +11,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-
+from typing import Tuple
 from flax import struct
 from jax.lax import cond
 import jax.numpy as jnp
@@ -24,7 +24,7 @@ from grad_dft import (
     density,
     grad_density,
     abs_clip,
-    energy_predictor
+    energy_predictor,
 )
 from grad_dft.interface.pyscf import (
     generate_chi_tensor,
@@ -45,8 +45,11 @@ as quadratic loss functions.
 
 
 def x1_c1(
-    functional: Functional, params: PyTree, molecule: Molecule, precision=Precision.HIGHEST
-) -> (Float, Float):
+    functional: Functional,
+    params: PyTree,
+    molecule: Molecule,
+    precision=Precision.HIGHEST,
+) -> Tuple[Float, Float]:
     r"""
     Instantiates a loss function checking the following constraints:
     .. math::
@@ -68,12 +71,24 @@ def x1_c1(
     # Compute the input features
     densities = functional.compute_densities(molecule)
     cinputs = functional.compute_coefficient_inputs(molecule)
-    coefficients = functional.apply(params,cinputs)
+    coefficients = functional.apply(params, cinputs)
 
-    ex = jnp.einsum('rf,rf,f->r', coefficients, densities,functional.exchange_mask, precision=precision)
+    ex = jnp.einsum(
+        "rf,rf,f->r",
+        coefficients,
+        densities,
+        functional.exchange_mask,
+        precision=precision,
+    )
     Ex = functional._integrate(relu(ex), molecule.grid.weights)
 
-    ec = jnp.einsum('rf,rf,f->r', coefficients, densities,1-functional.exchange_mask, precision=precision)
+    ec = jnp.einsum(
+        "rf,rf,f->r",
+        coefficients,
+        densities,
+        1 - functional.exchange_mask,
+        precision=precision,
+    )
     Ec = functional._integrate(relu(ec), molecule.grid.weights)
 
     # return jnp.less_equal(ex, 0.), jnp.less_equal(ec, 0.)
@@ -81,7 +96,10 @@ def x1_c1(
 
 
 def c2(
-    functional: Functional, params: PyTree, molecule: Molecule, precision=Precision.HIGHEST
+    functional: Functional,
+    params: PyTree,
+    molecule: Molecule,
+    precision=Precision.HIGHEST,
 ) -> Float:
     r"""
     Instantiates a loss function checking the following constraint:
@@ -108,10 +126,16 @@ def c2(
     # Compute the input features
     densities = functional.compute_densities(molecule)
     cinputs = functional.compute_coefficient_inputs(molecule)
-    coefficients = functional.apply(params,cinputs)
+    coefficients = functional.apply(params, cinputs)
 
     # Mask the exchange features
-    ec = jnp.einsum('rf,rf,f->r', coefficients, densities,1-functional.exchange_mask, precision=precision)
+    ec = jnp.einsum(
+        "rf,rf,f->r",
+        coefficients,
+        densities,
+        1 - functional.exchange_mask,
+        precision=precision,
+    )
 
     # Compute the exchange-correlation energy at each point
     Ec = functional._integrate(ec, molecule.grid.weights)
@@ -122,7 +146,10 @@ def c2(
 
 
 def x2(
-    functional: Functional, params: PyTree, molecule: Molecule, precision=Precision.HIGHEST
+    functional: Functional,
+    params: PyTree,
+    molecule: Molecule,
+    precision=Precision.HIGHEST,
 ) -> Float:
     r"""
     Instantiates a loss function checking the following constraint:
@@ -152,31 +179,49 @@ def x2(
     densities = functional.compute_densities(molecule)
     cinputs = functional.compute_coefficient_inputs(molecule)
     # Apply the functional
-    coefficients = functional.apply(params,cinputs)
+    coefficients = functional.apply(params, cinputs)
     # Mask the exchange features
-    ex = jnp.einsum('rf,rf,f->r', coefficients, densities,functional.exchange_mask, precision=precision)
+    ex = jnp.einsum(
+        "rf,rf,f->r",
+        coefficients,
+        densities,
+        functional.exchange_mask,
+        precision=precision,
+    )
     Exc = functional._integrate(ex, molecule.grid.weights)
 
     # Replace rdm1 with rdm1u
-    molecule = molecule.replace(rdm1 = rdm1u)
+    molecule = molecule.replace(rdm1=rdm1u)
     # Compute the input coefficient inputs and densities
     densities = functional.compute_densities(molecule)
     cinputs = functional.compute_coefficient_inputs(molecule)
     # Apply the functional
-    coefficients = functional.apply(params,cinputs)
+    coefficients = functional.apply(params, cinputs)
     # Mask the exchange features
-    ex = jnp.einsum('rf,rf,f->r', coefficients, densities,functional.exchange_mask, precision=precision)
+    ex = jnp.einsum(
+        "rf,rf,f->r",
+        coefficients,
+        densities,
+        functional.exchange_mask,
+        precision=precision,
+    )
     Excu = functional._integrate(ex, molecule.grid.weights)
 
     # Replace rdm1 with rdm1d
-    molecule = molecule.replace(rdm1 = rdm1d)
+    molecule = molecule.replace(rdm1=rdm1d)
     # Compute the input coefficient inputs and densities
     densities = functional.compute_densities(molecule)
     cinputs = functional.compute_coefficient_inputs(molecule)
     # Apply the functional
-    coefficients = functional.apply(params,cinputs)
+    coefficients = functional.apply(params, cinputs)
     # Mask the exchange features
-    ex = jnp.einsum('rf,rf,f->r', coefficients, densities,functional.exchange_mask, precision=precision)
+    ex = jnp.einsum(
+        "rf,rf,f->r",
+        coefficients,
+        densities,
+        functional.exchange_mask,
+        precision=precision,
+    )
     Excd = functional._integrate(ex, molecule.grid.weights)
 
     # Reinserting original rdm1 into molecule
@@ -192,7 +237,7 @@ def x3_c3_c4(
     molecule: Molecule,
     gamma: Scalar = 2,
     precision=Precision.HIGHEST,
-) -> (Float, Float, Float):
+) -> Tuple[Float, Float, Float]:
     r"""
     Instantiates a loss function checking the following constraints:
     .. math::
@@ -236,13 +281,25 @@ def x3_c3_c4(
     densities = functional.compute_densities(molecule)
     cinputs = functional.compute_coefficient_inputs(molecule)
     # Apply the functional
-    coefficients = functional.apply(params,cinputs)
+    coefficients = functional.apply(params, cinputs)
     # Mask the exchange features
-    ex = jnp.einsum('rf,rf,f->r', coefficients, densities, functional.exchange_mask, precision=precision)
+    ex = jnp.einsum(
+        "rf,rf,f->r",
+        coefficients,
+        densities,
+        functional.exchange_mask,
+        precision=precision,
+    )
     Ex = functional._integrate(ex, molecule.grid.weights)
 
     # Mask the correlation features
-    ec = jnp.einsum('rf,rf,f->r', coefficients, densities, 1-functional.exchange_mask, precision=precision)
+    ec = jnp.einsum(
+        "rf,rf,f->r",
+        coefficients,
+        densities,
+        1 - functional.exchange_mask,
+        precision=precision,
+    )
     Ec = functional._integrate(ec, molecule.grid.weights)
 
     # Replace the molecule properties with the scaled ones
@@ -267,7 +324,9 @@ def x3_c3_c4(
         for k in grad_n_ao1.keys():
             grad_n_ao[k] = grad_n_ao1[k] * g ** (3 / 2 + k)
         chi = chi1 * g ** (5 / 2)
-        molecule = molecule.replace(ao=ao, grad_ao=grad_ao, grad_n_ao=grad_n_ao, chi=chi)
+        molecule = molecule.replace(
+            ao=ao, grad_ao=grad_ao, grad_n_ao=grad_n_ao, chi=chi
+        )
 
         grid = molecule.grid
         grid = grid.replace(coords=grid_coords1 * g)
@@ -278,17 +337,31 @@ def x3_c3_c4(
         densities = functional.compute_densities(molecule)
         cinputs = functional.compute_coefficient_inputs(molecule)
         # Apply the functional
-        coefficients = functional.apply(params,cinputs)
+        coefficients = functional.apply(params, cinputs)
         # Mask the exchange features
-        exg = jnp.einsum('rf,rf,f->r', coefficients, densities, functional.exchange_mask, precision=precision)
+        exg = jnp.einsum(
+            "rf,rf,f->r",
+            coefficients,
+            densities,
+            functional.exchange_mask,
+            precision=precision,
+        )
         Exg = functional._integrate(exg, molecule.grid.weights)
 
         # Mask the correlation features
-        ecg = jnp.einsum('rf,rf,f->r', coefficients, densities, 1-functional.exchange_mask, precision=precision)
+        ecg = jnp.einsum(
+            "rf,rf,f->r",
+            coefficients,
+            densities,
+            1 - functional.exchange_mask,
+            precision=precision,
+        )
         Ecg = functional._integrate(ecg, molecule.grid.weights)
 
         # Checking the x3 constraint
-        exchange_constraint_losses = exchange_constraint_losses.at[i].set((g * Ex - Exg) ** 2)
+        exchange_constraint_losses = exchange_constraint_losses.at[i].set(
+            (g * Ex - Exg) ** 2
+        )
 
         # using jax, check whether gamma*Ec > Ecg or gamma*Ec < Ecg depending on i:
         c3c4 = cond(
@@ -309,10 +382,14 @@ def x3_c3_c4(
             Ec,
             g,
         )
-        correlation_constraint_losses = correlation_constraint_losses.at[i].set(c3c4_loss)
+        correlation_constraint_losses = correlation_constraint_losses.at[i].set(
+            c3c4_loss
+        )
 
     # Reinserting original molecule properties
-    molecule = molecule.replace(ao=ao1, grad_ao=grad_ao1, grad_n_ao=grad_n_ao1, chi=chi1)
+    molecule = molecule.replace(
+        ao=ao1, grad_ao=grad_ao1, grad_n_ao=grad_n_ao1, chi=chi1
+    )
     grid = molecule.grid
     grid = grid.replace(coords=grid_coords1)
     grid = grid.replace(weights=grid_weights1)
@@ -333,7 +410,7 @@ def x4(
     precision=Precision.HIGHEST,
     lower_bound=1e-15,
     upper_bound=1e-5,
-    clip_cte = 1e-30,
+    clip_cte=1e-30,
 ) -> Float:
     r"""
     Instantiates a loss function checking the following constraints:
@@ -368,8 +445,12 @@ def x4(
     grad_density = molecule.grad_density().sum(axis=-1)
     lapl_density = molecule.lapl_density().sum(axis=-1)
 
-    s = jnp.where(jnp.greater_equal(density, clip_cte), grad_density / density ** (4 / 3), 0)
-    q = jnp.where(jnp.greater_equal(density, clip_cte), lapl_density / density ** (5 / 3), 0)
+    s = jnp.where(
+        jnp.greater_equal(density, clip_cte), grad_density / density ** (4 / 3), 0
+    )
+    q = jnp.where(
+        jnp.greater_equal(density, clip_cte), lapl_density / density ** (5 / 3), 0
+    )
 
     s2_cond = jnp.logical_and(
         jnp.logical_and(
@@ -402,7 +483,13 @@ def x4(
     if s2_mask:
         cinputsxs2 = jnp.einsum("rf,f->rf", cinputs, s2_mask, precision=precision)
         coefficients = functional.apply(params, cinputsxs2)
-        exs2 = jnp.einsum('rf,rf,f->r', coefficients, densities, functional.exchange_mask, precision=precision)
+        exs2 = jnp.einsum(
+            "rf,rf,f->r",
+            coefficients,
+            densities,
+            functional.exchange_mask,
+            precision=precision,
+        )
         s2loss = jnp.where(s2_cond, (exs2 / (lda_e * s**2) - 10 / 81) ** 2, 0)
     else:
         s2loss = 0
@@ -417,7 +504,9 @@ def x4(
     if qs2_mask:
         cinputsxqs2 = jnp.einsum("rf,f->rf", cinputs, qs2_mask, precision=precision)
         exqs2 = functional.apply(params, cinputsxqs2)
-        qs2loss = jnp.where(qs2_cond, (exqs2 / (lda_e * s**2 * q) + 146 / 2025 * 5 / 2) ** 2, 0)
+        qs2loss = jnp.where(
+            qs2_cond, (exqs2 / (lda_e * s**2 * q) + 146 / 2025 * 5 / 2) ** 2, 0
+        )
     else:
         qs2loss = 0
 
@@ -444,7 +533,7 @@ def x5(
     precision=Precision.HIGHEST,
     multiplier1=1e5,
     multiplier2=1e7,
-    clip_cte = 1e-30,
+    clip_cte=1e-30,
 ) -> Float:
     r"""
     Instantiates a loss function checking the following constraints:
@@ -481,7 +570,8 @@ def x5(
         def grad_density(self, *args, **kwargs) -> Array:
             r"""Scaled kinetic energy"""
             return (
-                grad_density(self.rdm1, self.ao, self.grad_ao, *args, **kwargs) * self.s_multiplier
+                grad_density(self.rdm1, self.ao, self.grad_ao, *args, **kwargs)
+                * self.s_multiplier
             )
 
     modmolecule = modMolecule(
@@ -519,17 +609,27 @@ def x5(
     density1 = modmolecule.density()
     grad_density1 = modmolecule.grad_density().sum(axis=-1)
 
-    s1 = jnp.where(jnp.greater_equal(density1, 1e-30), grad_density1 / density1 ** (4 / 3), 0)
+    s1 = jnp.where(
+        jnp.greater_equal(density1, 1e-30), grad_density1 / density1 ** (4 / 3), 0
+    )
     a = jnp.isnan(s1).any()
 
     cinputs1 = functional.compute_coefficient_inputs(modmolecule)
     densities1 = functional.compute_densities(modmolecule)
     coefficients1 = functional.apply(params, cinputs1)
-    ex1 = jnp.einsum('rf,rf,f->r', coefficients1, densities1, functional.exchange_mask, precision=precision)
+    ex1 = jnp.einsum(
+        "rf,rf,f->r",
+        coefficients1,
+        densities1,
+        functional.exchange_mask,
+        precision=precision,
+    )
     ex1 = jnp.expand_dims(ex1, axis=-1)
 
     fx1 = jnp.where(
-        jnp.greater_equal(jnp.abs(lda_e * jnp.sqrt(s1)), 1e-30), ex1 / (lda_e * jnp.sqrt(s1)), 0
+        jnp.greater_equal(jnp.abs(lda_e * jnp.sqrt(s1)), 1e-30),
+        ex1 / (lda_e * jnp.sqrt(s1)),
+        0,
     )
     a = jnp.isnan(fx1).any()
 
@@ -538,17 +638,27 @@ def x5(
     density2 = modmolecule.density()
     grad_density2 = modmolecule.grad_density().sum(axis=-1)
 
-    s2 = jnp.where(jnp.greater_equal(density2, 1e-30), grad_density2 / density2 ** (4 / 3), 0)
+    s2 = jnp.where(
+        jnp.greater_equal(density2, 1e-30), grad_density2 / density2 ** (4 / 3), 0
+    )
     a = jnp.isnan(s2).any()
 
     cinputs2 = functional.compute_coefficient_inputs(modmolecule)
     densities2 = functional.compute_densities(modmolecule)
     coefficients2 = functional.apply(params, cinputs2)
-    ex2 = jnp.einsum('rf,rf,f->r', coefficients2, densities2, functional.exchange_mask, precision=precision)
+    ex2 = jnp.einsum(
+        "rf,rf,f->r",
+        coefficients2,
+        densities2,
+        functional.exchange_mask,
+        precision=precision,
+    )
     ex2 = jnp.expand_dims(ex2, axis=-1)
 
     fx2 = jnp.where(
-        jnp.greater_equal(jnp.abs(lda_e * jnp.sqrt(s2)), 1e-30), ex2 / (lda_e * jnp.sqrt(s2)), 0
+        jnp.greater_equal(jnp.abs(lda_e * jnp.sqrt(s2)), 1e-30),
+        ex2 / (lda_e * jnp.sqrt(s2)),
+        0,
     )
     a = jnp.isnan(fx2).any()
 
@@ -557,13 +667,21 @@ def x5(
     density_1 = modmolecule.density()
     grad_density_1 = modmolecule.grad_density().sum(axis=-1)
 
-    s_1 = jnp.where(jnp.greater_equal(density_1, 1e-30), grad_density_1 / density_1 ** (4 / 3), 0)
+    s_1 = jnp.where(
+        jnp.greater_equal(density_1, 1e-30), grad_density_1 / density_1 ** (4 / 3), 0
+    )
     a = jnp.isnan(s_1).any()
 
     cinputs_1 = functional.compute_coefficient_inputs(modmolecule)
     densities_1 = functional.compute_densities(modmolecule)
     coefficients_1 = functional.apply(params, cinputs_1)
-    ex_1 = jnp.einsum('rf,rf,f->r', coefficients_1, densities_1, functional.exchange_mask, precision=precision)
+    ex_1 = jnp.einsum(
+        "rf,rf,f->r",
+        coefficients_1,
+        densities_1,
+        functional.exchange_mask,
+        precision=precision,
+    )
     ex_1 = jnp.expand_dims(ex_1, axis=-1)
 
     fx_1 = jnp.where(
@@ -578,13 +696,21 @@ def x5(
     density_2 = modmolecule.density()
     grad_density_2 = modmolecule.grad_density().sum(axis=-1)
 
-    s_2 = jnp.where(jnp.greater_equal(density_2, 1e-30), grad_density_2 / density_2 ** (4 / 3), 0)
+    s_2 = jnp.where(
+        jnp.greater_equal(density_2, 1e-30), grad_density_2 / density_2 ** (4 / 3), 0
+    )
     a = jnp.isnan(s2).any()
 
     cinputs_2 = functional.compute_coefficient_inputs(modmolecule)
     densities_2 = functional.compute_densities(modmolecule)
     coefficients_2 = functional.apply(params, cinputs_2)
-    ex_2 = jnp.einsum('rf,rf,f->r', coefficients_2, densities_2, functional.exchange_mask, precision=precision)
+    ex_2 = jnp.einsum(
+        "rf,rf,f->r",
+        coefficients_2,
+        densities_2,
+        functional.exchange_mask,
+        precision=precision,
+    )
     ex_2 = jnp.expand_dims(ex_2, axis=-1)
 
     fx_2 = jnp.where(
@@ -606,7 +732,11 @@ def x5(
 
 
 def x6(
-    functional: Functional, params: PyTree, molecule: Molecule, precision=Precision.HIGHEST, clip_cte = 1e-30
+    functional: Functional,
+    params: PyTree,
+    molecule: Molecule,
+    precision=Precision.HIGHEST,
+    clip_cte=1e-30,
 ) -> Float:
     r"""
     Instantiates a loss function checking the following constraints:
@@ -642,8 +772,14 @@ def x6(
     cinputs = functional.compute_coefficient_inputs(molecule)
     densities = functional.compute_densities(molecule)
     coefficients = functional.apply(params, cinputs)
-    ex = jnp.einsum('rf,rf,f->r', coefficients, densities, functional.exchange_mask, precision=precision)
-    exc = jnp.einsum('rf,rf->r', coefficients, densities, precision=precision)
+    ex = jnp.einsum(
+        "rf,rf,f->r",
+        coefficients,
+        densities,
+        functional.exchange_mask,
+        precision=precision,
+    )
+    exc = jnp.einsum("rf,rf->r", coefficients, densities, precision=precision)
 
     # Put rdm1 back in place
     molecule = molecule.replace(rdm1=rdm1)
@@ -651,13 +787,15 @@ def x6(
     # return jnp.greater_equal(ex, exc).all(), jnp.greater_equal(exc, 1.804*lsda_e).all()
     return functional._integrate(
         (relu(exc - ex)) ** 2, molecule.grid.weights
-    ), functional._integrate(
-        (relu(1.804 * lda_e - exc)) ** 2, molecule.grid.weights
-    )
+    ), functional._integrate((relu(1.804 * lda_e - exc)) ** 2, molecule.grid.weights)
 
 
 def x7(
-    functional: Functional, params: PyTree, molecule2e: Molecule, precision=Precision.HIGHEST, clip_cte = 1e-30
+    functional: Functional,
+    params: PyTree,
+    molecule2e: Molecule,
+    precision=Precision.HIGHEST,
+    clip_cte=1e-30,
 ) -> Float:
     r"""
     Instantiates a loss function checking the following constraints:
@@ -719,7 +857,13 @@ def x7(
     cinputs = functional.compute_coefficient_inputs(modmolecule)
     densities = functional.compute_densities(modmolecule)
     coefficients = functional.apply(params, cinputs)
-    functional_e = jnp.einsum('rf,rf,f->r', coefficients, densities, functional.exchange_mask, precision=precision)
+    functional_e = jnp.einsum(
+        "rf,rf,f->r",
+        coefficients,
+        densities,
+        functional.exchange_mask,
+        precision=precision,
+    )
 
     lda_functional = LSDA
     lda_densities = lda_functional.compute_densities(modmolecule)
@@ -730,13 +874,21 @@ def x7(
 
     # return jnp.where(jnp.greater_equal(lsda_e, 1e-30), jnp.less_equal(functional_e / lsda_e, 1.174), True).all()
     return functional._integrate(
-        jnp.where(jnp.greater_equal(lda_e, 1e-30), (relu(functional_e / lda_e - 1.174) ** 2), 0),
+        jnp.where(
+            jnp.greater_equal(lda_e, 1e-30),
+            (relu(functional_e / lda_e - 1.174) ** 2),
+            0,
+        ),
         molecule2e.grid.weights,
     )
 
 
 def c6(
-    functional: Functional, params: PyTree, molecule: Molecule, multiplier: Scalar = 1e-7, precision=Precision.HIGHEST
+    functional: Functional,
+    params: PyTree,
+    molecule: Molecule,
+    multiplier: Scalar = 1e-7,
+    precision=Precision.HIGHEST,
 ) -> Float:
     r"""
     Instantiates a loss function checking the following constraints:
@@ -763,10 +915,7 @@ def c6(
 
         def density(self, *args, **kwargs) -> Array:
             r"""Scaled kinetic energy"""
-            return (
-                density(self.rdm1, self.ao, *args, **kwargs)
-                * self.rho_scale
-            )
+            return density(self.rdm1, self.ao, *args, **kwargs) * self.rho_scale
 
     modmolecule = modMolecule(
         molecule.grid,
@@ -801,7 +950,13 @@ def c6(
     cinputs = functional.compute_coefficient_inputs(modmolecule)
     densities = functional.compute_densities(modmolecule)
     coefficients = functional.apply(params, cinputs)
-    ec = jnp.einsum('rf,rf,f->r', coefficients, densities, 1-functional.exchange_mask, precision=precision)
+    ec = jnp.einsum(
+        "rf,rf,f->r",
+        coefficients,
+        densities,
+        1 - functional.exchange_mask,
+        precision=precision,
+    )
     Ec = functional._integrate(ec, modmolecule.grid.weights)
 
     # return jnp.isclose(Ec, 0)
@@ -809,7 +964,11 @@ def c6(
 
 
 def xc2(
-    functional: Functional, params: PyTree, molecule: Molecule, gamma: Scalar = 1e-7, precision=Precision.HIGHEST
+    functional: Functional,
+    params: PyTree,
+    molecule: Molecule,
+    gamma: Scalar = 1e-7,
+    precision=Precision.HIGHEST,
 ) -> Float:
     r"""
     Instantiates a loss function checking the following constraints:
@@ -855,14 +1014,26 @@ def xc2(
     cinputs = functional.compute_coefficient_inputs(molecule)
     densities = functional.compute_densities(molecule)
     coefficients = functional.apply(params, cinputs)
-    ec = jnp.einsum('rf,rf,f->r', coefficients, densities, 1-functional.exchange_mask, precision=precision)
+    ec = jnp.einsum(
+        "rf,rf,f->r",
+        coefficients,
+        densities,
+        1 - functional.exchange_mask,
+        precision=precision,
+    )
     Ec = functional._integrate(ec, molecule.grid.weights)
 
     molecule = molecule = molecule.replace(rdm1=(rdm11 + rdm11[::-1]) / 2)
     cinputs = functional.compute_coefficient_inputs(molecule)
     densities = functional.compute_densities(molecule)
     coefficients = functional.apply(params, cinputs)
-    ec = jnp.einsum('rf,rf,f->r', coefficients, densities, 1-functional.exchange_mask, precision=precision)
+    ec = jnp.einsum(
+        "rf,rf,f->r",
+        coefficients,
+        densities,
+        1 - functional.exchange_mask,
+        precision=precision,
+    )
     Ec_sym = functional._integrate(ec, molecule.grid.weights)
 
     # Reinserting original molecule properties
@@ -879,14 +1050,17 @@ def xc2(
 
 
 def xc4(
-    functional: Functional, params: PyTree, molecule2e: Molecule, precision=Precision.HIGHEST
+    functional: Functional,
+    params: PyTree,
+    molecule2e: Molecule,
+    precision=Precision.HIGHEST,
 ):
     r"""
     Instantiates a loss function checking the following constraints:
     For a two electron system:
     .. math::
         E_{xc}[n2] \geq 1.671 E_{xc}^{LDA}[n2]
-    
+
     Parameters
     ----------
     functional : Functional
@@ -905,7 +1079,9 @@ def xc4(
     lda_functional = LSDA
     lda_cinputs = lda_functional.compute_coefficient_inputs(molecule2e)
     lda_densities = lda_functional.compute_densities(molecule2e)
-    Exc_lda = lda_functional.xc_energy(params, molecule2e.grid, lda_cinputs, lda_densities)
+    Exc_lda = lda_functional.xc_energy(
+        params, molecule2e.grid, lda_cinputs, lda_densities
+    )
 
     # return jnp.greater_equal(Exc, 1.671*Ex_lda)
     return (relu(1.671 * Exc_lda - Exc)) ** 2

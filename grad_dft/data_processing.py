@@ -35,16 +35,20 @@ data_path = os.path.join(dirpath, data_dir)
 # Select the configuration here
 basis = "def2-tzvp"  # This basis is available for all elements up to atomic number 86
 grid_level = 2
-omegas = []  # [0., 0.4] # This indicates the values of omega in the range-separated exact-exchange.
+omegas = (
+    []
+)  # [0., 0.4] # This indicates the values of omega in the range-separated exact-exchange.
 # It is relatively memory intensive. omega = 0 is the usual Coulomb kernel.
 # Leave empty if no Coulomb kernel is expected.
 
 max_electrons = 20  # Select the largest number of electrons we allow for W4-17
 
 
-def process_dimers(training=True, combine=False, max_cycle=None, xc_functional="b3lyp", omegas = []):
+def process_dimers(
+    training=True, combine=False, max_cycle=None, xc_functional="b3lyp", omegas=[]
+):
     r"""Generates the HDF5 files corresponding to the dimers of the XND dataset.
-    
+
     Parameters
     ----------
     training : bool
@@ -74,7 +78,9 @@ def process_dimers(training=True, combine=False, max_cycle=None, xc_functional="
     """
     # We first read the excel file
     dataset_file = os.path.join(dirpath, data_dir, "raw/XND_dataset.xlsx")
-    dimers_df = pd.read_excel(dataset_file, header=0, index_col=None, sheet_name="Dimers")
+    dimers_df = pd.read_excel(
+        dataset_file, header=0, index_col=None, sheet_name="Dimers"
+    )
     atoms_df = pd.read_excel(dataset_file, header=0, index_col=0, sheet_name="Atoms")
 
     # We will save three files: one with one transition metal (tm) dimers, another with non-tm dimers
@@ -125,7 +131,11 @@ def process_dimers(training=True, combine=False, max_cycle=None, xc_functional="
         if max_cycle:
             energy = mf.e_tot
         molecule = molecule_from_pyscf(
-            mf, name=atom1 + atom2, energy=energy, scf_iteration=max_cycle, omegas=omegas
+            mf,
+            name=atom1 + atom2,
+            energy=energy,
+            scf_iteration=max_cycle,
+            omegas=omegas,
         )
 
         # Attach the molecule to the list of molecules
@@ -155,7 +165,7 @@ def process_dimers(training=True, combine=False, max_cycle=None, xc_functional="
         return molecules, tm_molecules, non_tm_molecules
 
 
-def process_atoms(training=True, combine=False, max_cycle=None, noise=0, omegas = []):
+def process_atoms(training=True, combine=False, max_cycle=None, noise=0, omegas=[]):
     r"""
     Generates the HDF5 files corresponding to the atoms of the XND dataset.
 
@@ -185,7 +195,7 @@ def process_atoms(training=True, combine=False, max_cycle=None, noise=0, omegas 
     -----
     This function is not as extensively tested as it can be substantially adapted by the user,
     for example depending on whether transition metal atoms should be excluded.
-    
+
     """
     # We first read the excel file of the dataset
     dataset_file = os.path.join(dirpath, data_dir, "raw/XND_dataset.xlsx")
@@ -197,14 +207,20 @@ def process_atoms(training=True, combine=False, max_cycle=None, noise=0, omegas 
     for i in tqdm(range(1, 37), desc="Processing atoms"):
         # Extract the molecule information
         atom = ELEMENTS[i]
-        energy = float(atoms_df["ccsd(t)/cbs energy 3-point"][atom]) + np.random.normal(0, noise)
+        energy = float(atoms_df["ccsd(t)/cbs energy 3-point"][atom]) + np.random.normal(
+            0, noise
+        )
         spin = compute_spin_element(atom)
         geometry = [[atom, [0, 0, 0]]]
 
         # Create the Molecule object
         mol = gto.M(atom=geometry, basis=basis, charge=charge, spin=spin)
         _, mf = process_mol(
-            mol, compute_energy=False, grid_level=grid_level, training=training, max_cycle=max_cycle
+            mol,
+            compute_energy=False,
+            grid_level=grid_level,
+            training=training,
+            max_cycle=max_cycle,
         )
         if max_cycle:
             energy = mf.e_tot
@@ -306,7 +322,11 @@ def process_dissociation(
 
         # Create a mol and molecule
         _, mf = process_mol(
-            mol, compute_energy=False, grid_level=grid_level, training=training, max_cycle=max_cycle
+            mol,
+            compute_energy=False,
+            grid_level=grid_level,
+            training=training,
+            max_cycle=max_cycle,
         )
         if max_cycle:
             energy = mf.e_tot
@@ -369,11 +389,19 @@ def process_w4x17(training=True, combine=False, max_cycle=None):
         # Product: processing and creating associated molecule
         reactname = file[:-4]
         mol = gto.M(
-            atom=geometry, unit="Angstrom", basis=basis, charge=charge, spin=multiplicity - 1
+            atom=geometry,
+            unit="Angstrom",
+            basis=basis,
+            charge=charge,
+            spin=multiplicity - 1,
         )
         product_numbers.append(1)
         _, mf = process_mol(
-            mol, compute_energy=False, grid_level=grid_level, training=training, max_cycle=max_cycle
+            mol,
+            compute_energy=False,
+            grid_level=grid_level,
+            training=training,
+            max_cycle=max_cycle,
         )
         product = molecule_from_pyscf(mf, name=reactname, omegas=omegas)
         products.append(product)
@@ -401,7 +429,9 @@ def process_w4x17(training=True, combine=False, max_cycle=None):
         n_electrons = 0
         for atom in atom_symbols.keys():
             geometry = [[atom, 0.0, 0.0, 0.0]]
-            mol = gto.M(atom=geometry, basis=basis, symmetry=1, spin=compute_spin_element(atom))
+            mol = gto.M(
+                atom=geometry, basis=basis, symmetry=1, spin=compute_spin_element(atom)
+            )
             _, mf = process_mol(
                 mol,
                 compute_energy=False,
@@ -417,7 +447,12 @@ def process_w4x17(training=True, combine=False, max_cycle=None):
 
         # Make reaction
         reaction = make_reaction(
-            reactants, products, reactant_numbers, product_numbers, reaction_energy, name=reactname
+            reactants,
+            products,
+            reactant_numbers,
+            product_numbers,
+            reaction_energy,
+            name=reactname,
         )
         reactname = reactname + "_" + str(n_electrons)
         reactions.append(reaction)
@@ -440,7 +475,9 @@ def compute_spin_element(atom):
     Computes the spin of an atom from its electronic configuration.
     """
     i = ELEMENTS.index(atom)
-    configuration = CONFIGURATION[i]  # This indicates the electronic configuration of a given atom
+    configuration = CONFIGURATION[
+        i
+    ]  # This indicates the electronic configuration of a given atom
 
     spin = configuration[0] % 2
     spin += min(configuration[1] % 6, 6 - configuration[1] % 6)

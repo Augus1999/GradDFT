@@ -14,22 +14,23 @@
 
 from typing import Callable, Optional, Tuple, Union
 from functools import partial
-from jaxtyping import Array, PRNGKeyArray, PyTree, Scalar, Float, Complex
+from jaxtyping import Array, PyTree, Scalar, Float, Complex
 
 from jax import numpy as jnp, vmap
-from jax import value_and_grad, grad
+from jax import value_and_grad
 from jax.profiler import annotate_function
 from jax.lax import stop_gradient
 from optax import OptState, GradientTransformation, apply_updates
 
 from grad_dft import (
     coulomb_energy,
-    DispersionFunctional, 
+    DispersionFunctional,
     Functional,
     Molecule,
-    Solid, 
-    abs_clip, 
+    Solid,
+    abs_clip,
 )
+
 
 def energy_predictor(
     functional: Functional,
@@ -82,16 +83,17 @@ def energy_predictor(
     >>> fock.shape == molecule.density_matrix.shape
     True
     """
-    
+
     @partial(value_and_grad, argnums=1)
     def xc_energy_and_grads(
-        params: PyTree, 
-        rdm1: Union[Float[Array, "spin orbitals orbitals"],
-                    Complex[Array, "spin kpt orbitals orbitals"]
-                ], 
-        atoms: Union[Molecule, Solid], 
-        *args, 
-        **functional_kwargs
+        params: PyTree,
+        rdm1: Union[
+            Float[Array, "spin orbitals orbitals"],
+            Complex[Array, "spin kpt orbitals orbitals"],
+        ],
+        atoms: Union[Molecule, Solid],
+        *args,
+        **functional_kwargs,
     ) -> Scalar:
         r"""
         Computes the xc energy and gradients with respect to the density matrix.
@@ -118,10 +120,14 @@ def energy_predictor(
             e = e + nlc_functional.energy(
                 {"params": params["dispersion"]}, atoms, **functional_kwargs
             )
-        return functional.xc_energy(params, atoms.grid, cinputs, densities, **functional_kwargs)
+        return functional.xc_energy(
+            params, atoms.grid, cinputs, densities, **functional_kwargs
+        )
 
     @partial(annotate_function, name="predict")
-    def predict(params: PyTree, atoms: Union[Molecule, Solid], *args) -> Tuple[Scalar, Array]:
+    def predict(
+        params: PyTree, atoms: Union[Molecule, Solid], *args
+    ) -> Tuple[Scalar, Array]:
         r"""A DFT functional wrapper, returning the predicted exchange-correlation
         energy as well as the corresponding Fock matrix. This function does **not** require
         that the provided `feature_fn` returns derivatives (Jacobian matrix) of provided
@@ -140,32 +146,34 @@ def energy_predictor(
         Tuple[Scalar, Array]
             A tuple of the predicted exchange-correlation energy and the corresponding
             Fock matrix of the same shape as `atoms.rdm1`:
-            (*batch_size, n_spin, n_orbitals, n_orbitals) for a `Molecule` or 
+            (*batch_size, n_spin, n_orbitals, n_orbitals) for a `Molecule` or
             (*batch_size, n_spin, n_kpt, n_orbitals, n_orbitals) for a `Solid`.
         """
-        
+
         Exc, fock_xc = xc_energy_and_grads(params, atoms.rdm1, atoms, *args)
         fock_noxc = atoms.h1e + atoms.get_coulomb_potential()
-        
+
         energy = Exc + atoms.nonXC()
-        
+
         if isinstance(atoms, Molecule):
             transpose_dims = (0, 2, 1)
             fock = fock_noxc + fock_xc
         elif isinstance(atoms, Solid):
             transpose_dims = (0, 1, 3, 2)
             # auto-diffed xc gradient is divided by n_k=number of k-points. Undo this.
-            fock = fock_noxc + (fock_xc*atoms.rdm1.shape[1])
-            
+            fock = fock_noxc + (fock_xc * atoms.rdm1.shape[1])
+
         # Improve stability by clipping and symmetrizing
         fock = abs_clip(fock, clip_cte)
         fock = 1 / 2 * (fock + fock.transpose(transpose_dims).conj())
         fock = abs_clip(fock, clip_cte)
-        
+
         # Compute the features that should be autodifferentiated
         if functional.energy_densities and functional.densitygrads:
             grad_densities = functional.energy_densities(atoms, *args, **kwargs)
-            nograd_densities = stop_gradient(functional.nograd_densities(atoms, *args, **kwargs))
+            nograd_densities = stop_gradient(
+                functional.nograd_densities(atoms, *args, **kwargs)
+            )
             densities = functional.combine_densities(grad_densities, nograd_densities)
         elif functional.energy_densities:
             grad_densities = functional.energy_densities(atoms, *args, **kwargs)
@@ -173,7 +181,9 @@ def energy_predictor(
             densities = grad_densities
         elif functional.densitygrads:
             grad_densities = None
-            nograd_densities = stop_gradient(functional.nograd_densities(atoms, *args, **kwargs))
+            nograd_densities = stop_gradient(
+                functional.nograd_densities(atoms, *args, **kwargs)
+            )
             densities = nograd_densities
         else:
             densities, grad_densities, nograd_densities = None, None, None
@@ -217,13 +227,11 @@ def energy_predictor(
 
     return predict
 
-def Harris_energy_predictor(
-    functional: Functional,
-    **kwargs
-):
-    r""""
+
+def Harris_energy_predictor(functional: Functional, **kwargs):
+    r""" "
     Generate a function that predicts the Harris energy, according to the function
-    
+
     .. math::
         E_{\rm Harris}[n_0] = \sum_i \epsilon_i - \int \mathrm{d}r^3 v_{\rm xc}[n_0](r) n_0(r) - \tfrac{1}{2} \int \mathrm{d}r^3 v_{\rm H}[n_0](r) n_0(r) + E_{\rm xc}[n_0
 
@@ -238,13 +246,14 @@ def Harris_energy_predictor(
     -------
     Callable
     """
+
     @partial(value_and_grad, argnums=1)
     def xc_energy_and_grads(
-        params: PyTree, 
-        rdm1: Float[Array, "spin orbitals orbitals"], 
-        atoms: Union[Molecule, Solid], 
-        *args, 
-        **kwargs
+        params: PyTree,
+        rdm1: Float[Array, "spin orbitals orbitals"],
+        atoms: Union[Molecule, Solid],
+        *args,
+        **kwargs,
     ) -> Scalar:
         r"""
         Computes the energy and gradients with respect to the density matrix.
@@ -269,7 +278,6 @@ def Harris_energy_predictor(
         cinputs = functional.compute_coefficient_inputs(atoms, *args)
         return functional.xc_energy(params, atoms.grid, cinputs, densities, **kwargs)
 
-    
     # Works for Molecules only for now
     def Harris_energy(
         params: PyTree,
@@ -299,14 +307,21 @@ def Harris_energy_predictor(
 
         energy = jnp.einsum("sr,sr->", molecule.mo_occ, molecule.mo_energy)
 
-        coulomb_e = -coulomb_energy(molecule.rdm1.sum(axis = 0), molecule.rep_tensor)
+        coulomb_e = -coulomb_energy(molecule.rdm1.sum(axis=0), molecule.rep_tensor)
 
-        xc_energy, xcfock = xc_energy_and_grads(params, molecule.rdm1, molecule, *args, **kwargs)
+        xc_energy, xcfock = xc_energy_and_grads(
+            params, molecule.rdm1, molecule, *args, **kwargs
+        )
 
-        return energy + xc_energy - jnp.einsum("sij,sij->", molecule.rdm1, xcfock) + coulomb_e + molecule.nuclear_repulsion
+        return (
+            energy
+            + xc_energy
+            - jnp.einsum("sij,sij->", molecule.rdm1, xcfock)
+            + coulomb_e
+            + molecule.nuclear_repulsion
+        )
 
     return Harris_energy
-
 
 
 def train_kernel(tx: GradientTransformation, loss: Callable) -> Callable:
@@ -326,9 +341,13 @@ def train_kernel(tx: GradientTransformation, loss: Callable) -> Callable:
     """
 
     def kernel(
-        params: PyTree, opt_state: OptState, atoms: Union[Molecule, Solid], ground_truth_energy: float, *args
+        params: PyTree,
+        opt_state: OptState,
+        atoms: Union[Molecule, Solid],
+        ground_truth_energy: float,
+        *args,
     ) -> Tuple[PyTree, OptState, Scalar, Scalar]:
-        r""""
+        r""" "
         The training kernel updating the parameters according to the loss
         function and the optimizer.
 
@@ -363,7 +382,10 @@ def train_kernel(tx: GradientTransformation, loss: Callable) -> Callable:
 
 # Regularization terms only support `Molecule` object for now
 
-def fock_grad_regularization(molecule: Molecule, F: Float[Array, "spin ao ao"]) -> Scalar:
+
+def fock_grad_regularization(
+    molecule: Molecule, F: Float[Array, "spin ao ao"]
+) -> Scalar:
     """Calculates the Fock alternative regularization term for a `Molecule` given a Fock matrix.
 
     Parameters
@@ -383,7 +405,9 @@ def fock_grad_regularization(molecule: Molecule, F: Float[Array, "spin ao ao"]) 
     )
 
 
-def dm21_grad_regularization(molecule: Molecule, F: Float[Array, "spin ao ao"]) -> Scalar:
+def dm21_grad_regularization(
+    molecule: Molecule, F: Float[Array, "spin ao ao"]
+) -> Scalar:
     """Calculates the default gradient regularization term for a `Molecule` given a Fock matrix.
 
     Parameters
@@ -425,7 +449,9 @@ def dm21_grad_regularization(molecule: Molecule, F: Float[Array, "spin ao ao"]) 
     return dE**2
 
 
-def orbital_grad_regularization(molecule: Molecule, F: Float[Array, "spin ao ao"]) -> Scalar:
+def orbital_grad_regularization(
+    molecule: Molecule, F: Float[Array, "spin ao ao"]
+) -> Scalar:
     """Deprecated"""
 
     #  Calculate the gradient regularization term
@@ -466,8 +492,12 @@ def get_grad(
     return g.ravel()
     """
 
-    C_occ = vmap(jnp.where, in_axes=(None, 1, None), out_axes=1)(mo_occ > 0, mo_coeff, 0)
-    C_vir = vmap(jnp.where, in_axes=(None, 1, None), out_axes=1)(mo_occ == 0, mo_coeff, 0)
+    C_occ = vmap(jnp.where, in_axes=(None, 1, None), out_axes=1)(
+        mo_occ > 0, mo_coeff, 0
+    )
+    C_vir = vmap(jnp.where, in_axes=(None, 1, None), out_axes=1)(
+        mo_occ == 0, mo_coeff, 0
+    )
 
     return jnp.einsum("sab,sac,scd->bd", C_vir.conj(), F, C_occ)
 
@@ -478,19 +508,16 @@ def get_grad(
 def mse_energy_loss(
     params: PyTree,
     compute_energy: Callable,
-    atoms_list: Union[list[Molecule],
-                      list[Solid],
-                      list[Union[Molecule,Solid]],
-                      Molecule, 
-                      Solid
-                    ],
+    atoms_list: Union[
+        list[Molecule], list[Solid], list[Union[Molecule, Solid]], Molecule, Solid
+    ],
     truth_energies: Float[Array, "energy"],
     elec_num_norm: Scalar = True,
 ) -> Scalar:
     r"""
     Computes the mean-squared error between predicted and truth energies.
 
-    This loss function does not yet support parallel execution for the loss contributions. 
+    This loss function does not yet support parallel execution for the loss contributions.
     We instead use a simple serial for loop.
 
     Parameters
@@ -529,12 +556,14 @@ def mse_energy_loss(
 
     return cost_value
 
+
 @partial(value_and_grad, has_aux=True)
-def simple_energy_loss(params: PyTree,
+def simple_energy_loss(
+    params: PyTree,
     compute_energy: Callable,
     atoms: Union[Molecule, Solid],
     truth_energy: Float,
-    ):
+):
     r"""
     Computes the loss for a single molecule
 
@@ -559,7 +588,7 @@ def sq_electron_err_int(
     pred_density: Float[Array, "ngrid nspin"],
     truth_density: Float[Array, "ngrid nspin"],
     atoms: Union[Molecule, Solid],
-    clip_cte=1e-30
+    clip_cte=1e-30,
 ) -> Scalar:
     r"""
     Computes the integral:
@@ -581,21 +610,26 @@ def sq_electron_err_int(
     """
     pred_density = jnp.clip(pred_density, a_min=clip_cte)
     truth_density = jnp.clip(truth_density, a_min=clip_cte)
-    diff_up = jnp.clip(jnp.clip(pred_density[:, 0] - truth_density[:, 0], a_min=clip_cte) ** 2, a_min=clip_cte)
-    diff_dn = jnp.clip(jnp.clip(pred_density[:, 1] - truth_density[:, 1], a_min=clip_cte) ** 2, a_min=clip_cte)
-    err_int = jnp.sum(diff_up * atoms.grid.weights) + jnp.sum(diff_dn * atoms.grid.weights)
+    diff_up = jnp.clip(
+        jnp.clip(pred_density[:, 0] - truth_density[:, 0], a_min=clip_cte) ** 2,
+        a_min=clip_cte,
+    )
+    diff_dn = jnp.clip(
+        jnp.clip(pred_density[:, 1] - truth_density[:, 1], a_min=clip_cte) ** 2,
+        a_min=clip_cte,
+    )
+    err_int = jnp.sum(diff_up * atoms.grid.weights) + jnp.sum(
+        diff_dn * atoms.grid.weights
+    )
     return err_int
 
 
 def mse_density_loss(
     params: PyTree,
     compute_energy: Callable,
-    atoms_list: Union[list[Molecule],
-                      list[Solid],
-                      list[Union[Molecule,Solid]],
-                      Molecule, 
-                      Solid
-                    ],
+    atoms_list: Union[
+        list[Molecule], list[Solid], list[Union[Molecule, Solid]], Molecule, Solid
+    ],
     truth_rhos: list[Float[Array, "ngrid nspin"]],
     elec_num_norm: Scalar = True,
 ) -> Scalar:
@@ -645,12 +679,9 @@ def mse_density_loss(
 def mse_energy_and_density_loss(
     params: PyTree,
     compute_energy: Callable,
-    atoms_list: Union[list[Molecule],
-                      list[Solid],
-                      list[Union[Molecule,Solid]],
-                      Molecule, 
-                      Solid
-                    ],
+    atoms_list: Union[
+        list[Molecule], list[Solid], list[Union[Molecule, Solid]], Molecule, Solid
+    ],
     truth_densities: list[Float[Array, "ngrid nspin"]],
     truth_energies: Float[Array, "energy"],
     rho_factor: Scalar = 1.0,

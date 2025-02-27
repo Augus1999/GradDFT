@@ -12,12 +12,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from dataclasses import dataclass
-import itertools
 import os
-from typing import Callable, Optional, List, Dict, Union
-from functools import partial
 import math
+import itertools
+from functools import partial
+from dataclasses import dataclass
+from typing import Callable, Optional, List, Dict, Union
 
 from jax import grad
 from jax import numpy as jnp
@@ -34,14 +34,9 @@ from flax.training import train_state, checkpoints
 from flax.training.train_state import TrainState
 from optax import GradientTransformation
 from orbax.checkpoint import Checkpointer, PyTreeCheckpointer
-from typeguard import typechecked
+from typeguard import typechecked as typechecker
 
-from grad_dft import (
-    abs_clip,
-    Grid,
-    Molecule,
-    Solid
-)
+from grad_dft import abs_clip, Grid, Molecule, Solid
 from grad_dft.utils.types import DType, default_dtype
 
 
@@ -157,7 +152,9 @@ class Functional(nn.Module):
 
         return self.coefficients(self, coefficient_inputs)
 
-    def compute_densities(self, atoms: Union[Molecule, Solid],  clip_cte: float = 1e-30, *args, **kwargs):
+    def compute_densities(
+        self, atoms: Union[Molecule, Solid], clip_cte: float = 1e-30, *args, **kwargs
+    ):
         r"""
         Computes the densities for the functional, both with and without autodifferentiation.
 
@@ -173,7 +170,9 @@ class Functional(nn.Module):
 
         if self.nograd_densities and self.energy_densities:
             densities = self.energy_densities(atoms, *args, **kwargs)
-            nograd_densities = stop_gradient(self.nograd_densities(atoms, *args, **kwargs))
+            nograd_densities = stop_gradient(
+                self.nograd_densities(atoms, *args, **kwargs)
+            )
             densities = self.combine_densities(densities, nograd_densities)
 
         elif self.energy_densities:
@@ -181,10 +180,14 @@ class Functional(nn.Module):
 
         elif self.nograd_densities:
             densities = stop_gradient(self.nograd_densities(atoms, *args, **kwargs))
-        densities = abs_clip(densities, clip_cte) #todo: investigate if we can lower this
+        densities = abs_clip(
+            densities, clip_cte
+        )  # todo: investigate if we can lower this
         return densities
 
-    def compute_coefficient_inputs(self, atoms: Union[Molecule, Solid], *args, **kwargs):
+    def compute_coefficient_inputs(
+        self, atoms: Union[Molecule, Solid], *args, **kwargs
+    ):
         r"""
         Computes the inputs to the coefficients method in the functional
 
@@ -209,7 +212,9 @@ class Functional(nn.Module):
             cinputs = self.coefficient_inputs(atoms, *args, **kwargs)
 
         elif self.nograd_coefficient_inputs:
-            cinputs = stop_gradient(self.nograd_coefficient_inputs(atoms, *args, **kwargs))
+            cinputs = stop_gradient(
+                self.nograd_coefficient_inputs(atoms, *args, **kwargs)
+            )
 
         else:
             cinputs = None
@@ -217,13 +222,13 @@ class Functional(nn.Module):
         return cinputs
 
     def xc_energy(
-        self, 
-        params: PyTree, 
-        grid: Grid, 
+        self,
+        params: PyTree,
+        grid: Grid,
         coefficient_inputs: Float[Array, "grid cinputs"],
         densities: Float[Array, "grid densities"],
         clip_cte: float = 1e-30,
-        **kwargs
+        **kwargs,
     ) -> Scalar:
         r"""
         Total energy of local functional
@@ -252,7 +257,9 @@ class Functional(nn.Module):
         xc_energy_density = abs_clip(xc_energy_density, clip_cte)
         return self._integrate(xc_energy_density, grid.weights)
 
-    def energy(self, params: PyTree, atoms: Union[Molecule, Solid], *args, **kwargs) -> Scalar:
+    def energy(
+        self, params: PyTree, atoms: Union[Molecule, Solid], *args, **kwargs
+    ) -> Scalar:
         r"""
         Total energy of local functional
 
@@ -277,7 +284,7 @@ class Functional(nn.Module):
         """
 
         densities = self.compute_densities(atoms, *args, **kwargs)
-        
+
         cinputs = self.compute_coefficient_inputs(atoms, *args)
 
         energy = self.xc_energy(params, atoms.grid, cinputs, densities, **kwargs)
@@ -286,8 +293,10 @@ class Functional(nn.Module):
             energy += atoms.nonXC()
 
         return energy
-    
-    def energy_xc_only(self, params: PyTree, atoms: Union[Molecule, Solid], *args, **kwargs) -> Scalar:
+
+    def energy_xc_only(
+        self, params: PyTree, atoms: Union[Molecule, Solid], *args, **kwargs
+    ) -> Scalar:
         r"""
         Compute the XC only using the same function signature as functional.energy
 
@@ -306,7 +315,7 @@ class Functional(nn.Module):
         """
 
         densities = self.compute_densities(atoms, *args, **kwargs)
-        
+
         cinputs = self.compute_coefficient_inputs(atoms, *args)
 
         Exc = self.xc_energy(params, atoms.grid, cinputs, densities, **kwargs)
@@ -338,8 +347,13 @@ class Functional(nn.Module):
         Scalar
         """
 
-        #todo: study if we can lower this clipping constants
-        return jnp.einsum("r,r->", abs_clip(gridweights, clip_cte), abs_clip(energy_density, clip_cte), precision=precision)
+        # todo: study if we can lower this clipping constants
+        return jnp.einsum(
+            "r,r->",
+            abs_clip(gridweights, clip_cte),
+            abs_clip(energy_density, clip_cte),
+            precision=precision,
+        )
 
 
 @dataclass
@@ -394,7 +408,7 @@ class NeuralFunctional(Functional):
     param_dtype: DType = default_dtype()
 
     def setup(self):
-        r"""Sets up the neural network layers. """
+        r"""Sets up the neural network layers."""
         self.dense = partial(
             nn.Dense,
             param_dtype=self.param_dtype,
@@ -445,7 +459,8 @@ class NeuralFunctional(Functional):
         """
 
         state = train_state.TrainState.create(apply_fn=self.apply, params=params, tx=tx)
-
+        # orbax_checkpointer = PyTreeCheckpointer()
+        # save_args = orbax_utils.save_args_from_target(state)
         checkpoints.save_checkpoint(
             ckpt_dir=ckpt_dir,
             target=state,
@@ -454,6 +469,7 @@ class NeuralFunctional(Functional):
             orbax_checkpointer=orbax_checkpointer,
             keep_every_n_steps=50,
         )
+        # orbax_checkpointer.save(ckpt_dir, state, save_args=save_args)
 
     def load_checkpoint(
         self,
@@ -501,7 +517,9 @@ class NeuralFunctional(Functional):
 ######################## DM21 ########################
 
 
-def dm21_coefficient_inputs(atoms: Union[Molecule, Solid], clip_cte: Optional[float] = 1e-30, *_, **__):
+def dm21_coefficient_inputs(
+    atoms: Union[Molecule, Solid], clip_cte: Optional[float] = 1e-30, *_, **__
+):
     r"""
     Computes the electronic density and derivatives
 
@@ -605,7 +623,10 @@ def dm21_densities(
     # MGGA preprocessing data
     log_tau = jnp.log2(jnp.clip(tau, a_min=clip_cte))
     log_1t_sigma = -(
-        5 / 3.0 * log_rho - log_tau + 2 / 3.0 * jnp.log2(6 * jnp.pi**2) + jnp.log2(3 / 5.0)
+        5 / 3.0 * log_rho
+        - log_tau
+        + 2 / 3.0 * jnp.log2(6 * jnp.pi**2)
+        + jnp.log2(3 / 5.0)
     )
     log_w_sigma = jnp.where(
         jnp.greater(log_rho, jnp.log2(clip_cte)),
@@ -619,15 +640,17 @@ def dm21_densities(
         mgga_term = (2 ** (4 / 3.0 * log_rho + i * log_u_sigma + j * log_w_sigma)).sum(
             axis=1, keepdims=True
         ) * jnp.where(
-            jnp.logical_and(i == 0, j == 0), -2 * jnp.pi * (3 / (4 * jnp.pi)) ** (4 / 3), 1
+            jnp.logical_and(i == 0, j == 0),
+            -2 * jnp.pi * (3 / (4 * jnp.pi)) ** (4 / 3),
+            1,
         )  # to match DM21
         localfeatures = jnp.concatenate((localfeatures, mgga_term), axis=1)
 
     return localfeatures
 
+
 def dm21_combine_cinputs(
-    cinputs: Float[Array, "grid cinputs_whf"] , 
-    ehf: Float[Array, "omega spin grid"]
+    cinputs: Float[Array, "grid cinputs_whf"], ehf: Float[Array, "omega spin grid"]
 ) -> Float[Array, "grid cinputs"]:
     r"""
     Default way to combine Hartree-Fock and the rest of the input features to the neural network.
@@ -650,8 +673,7 @@ def dm21_combine_cinputs(
 
 
 def dm21_combine_densities(
-    densities: Float[Array, "grid densities_whf"], 
-    ehf: Float[Array, "omega spin grid"]
+    densities: Float[Array, "grid densities_whf"], ehf: Float[Array, "omega spin grid"]
 ) -> Float[Array, "grid densities"]:
     r"""
     Default way to combine Hartree-Fock and the rest of the input default features.
@@ -671,11 +693,12 @@ def dm21_combine_densities(
 
     # ... and in the y features by omega.
     return jnp.concatenate(
-        [densities] + [ehf[i].sum(axis=0, keepdims=True).T for i in range(len(ehf))], axis=1
+        [densities] + [ehf[i].sum(axis=0, keepdims=True).T for i in range(len(ehf))],
+        axis=1,
     )
 
-@jaxtyped
-@typechecked
+
+@jaxtyped(typechecker=typechecker)
 def dm21_hfgrads_densities(
     functional: nn.Module,
     params: PyTree,
@@ -716,8 +739,8 @@ def dm21_hfgrads_densities(
     )
     return vxc_hf.sum(axis=0)  # Sum over omega
 
-@jaxtyped
-@typechecked
+
+@jaxtyped(typechecker=typechecker)
 def dm21_hfgrads_cinputs(
     functional: nn.Module,
     params: PyTree,
@@ -771,17 +794,33 @@ class DM21(NeuralFunctional):
     nograd_densities: staticmethod = lambda atoms, *_, **__: atoms.HF_energy_density(
         jnp.array([0.0, 0.4])
     )
-    densitygrads: staticmethod = lambda self, params, atoms, nograd_densities, cinputs, grad_densities, *_, **__: dm21_hfgrads_densities(
-        self, params, atoms, nograd_densities, cinputs, grad_densities, jnp.array([0.0, 0.4])
+    densitygrads: staticmethod = (
+        lambda self, params, atoms, nograd_densities, cinputs, grad_densities, *_, **__: dm21_hfgrads_densities(
+            self,
+            params,
+            atoms,
+            nograd_densities,
+            cinputs,
+            grad_densities,
+            jnp.array([0.0, 0.4]),
+        )
     )
     combine_densities: staticmethod = dm21_combine_densities
 
     coefficient_inputs: staticmethod = dm21_coefficient_inputs
-    nograd_coefficient_inputs: staticmethod = lambda atoms, *_, **__: atoms.HF_energy_density(
-        jnp.array([0.0, 0.4])
+    nograd_coefficient_inputs: staticmethod = (
+        lambda atoms, *_, **__: atoms.HF_energy_density(jnp.array([0.0, 0.4]))
     )
-    coefficient_input_grads: staticmethod = lambda self, params, atoms, nograd_cinputs, grad_cinputs, densities, *_, **__: dm21_hfgrads_cinputs(
-        self, params, atoms, nograd_cinputs, grad_cinputs, densities, jnp.array([0.0, 0.4])
+    coefficient_input_grads: staticmethod = (
+        lambda self, params, atoms, nograd_cinputs, grad_cinputs, densities, *_, **__: dm21_hfgrads_cinputs(
+            self,
+            params,
+            atoms,
+            nograd_cinputs,
+            grad_cinputs,
+            densities,
+            jnp.array([0.0, 0.4]),
+        )
     )
     combine_inputs: staticmethod = dm21_combine_cinputs
 
@@ -876,19 +915,23 @@ class DM21(NeuralFunctional):
                     if "Dense_" + str(number) not in params.keys():
                         params["Dense_" + str(number)] = {}
                     if "/w:" in var.name:
-                        params["Dense_" + str(number)]["kernel"] = tf_tensor_to_jax(var.value())
+                        params["Dense_" + str(number)]["kernel"] = tf_tensor_to_jax(
+                            var.value()
+                        )
                     elif "/b:" in var.name:
-                        params["Dense_" + str(number)]["bias"] = tf_tensor_to_jax(var.value())
+                        params["Dense_" + str(number)]["bias"] = tf_tensor_to_jax(
+                            var.value()
+                        )
                 elif "/layer_norm/" in var.name:
                     if "LayerNorm_" + str(number - 1) not in params.keys():
                         params["LayerNorm_" + str(number - 1)] = {}
                     if "gamma:" in var.name:
-                        params["LayerNorm_" + str(number - 1)]["scale"] = tf_tensor_to_jax(
-                            var.value()
+                        params["LayerNorm_" + str(number - 1)]["scale"] = (
+                            tf_tensor_to_jax(var.value())
                         )
                     elif "beta:" in var.name:
-                        params["LayerNorm_" + str(number - 1)]["bias"] = tf_tensor_to_jax(
-                            var.value()
+                        params["LayerNorm_" + str(number - 1)]["bias"] = (
+                            tf_tensor_to_jax(var.value())
                         )
             return params
 
@@ -908,16 +951,19 @@ class DM21(NeuralFunctional):
                     )
                 else:
                     check_same_params.append(True)
-            if int(key.split("_")[1]) > num_layers_with_dm_parameters or any(check_same_params):
+            if int(key.split("_")[1]) > num_layers_with_dm_parameters or any(
+                check_same_params
+            ):
                 new_params[key] = params["params"][key]
                 if (
                     "Dense" in key
-                    and new_params[key]["kernel"].shape[0] == new_params[key]["kernel"].shape[1]
+                    and new_params[key]["kernel"].shape[0]
+                    == new_params[key]["kernel"].shape[1]
                 ):  # DM21 suggests initializing the kernel matrices close to the identity matrix
                     new_params[key] = unfreeze(new_params[key])
-                    new_params[key]["kernel"] = new_params[key]["kernel"] + jnp.identity(
-                        new_params[key]["kernel"].shape[0]
-                    )
+                    new_params[key]["kernel"] = new_params[key][
+                        "kernel"
+                    ] + jnp.identity(new_params[key]["kernel"].shape[0])
                     new_params[key] = freeze(new_params[key])
             else:
                 new_params[key] = dm_params[key]
@@ -944,12 +990,12 @@ def canonicalize_inputs(x):
     else:
         return x
 
+
 ################ Spin polarization correction functions ################
 
 
 def exchange_polarization_correction(
-    e_PF: Float[Array, "spin grid"], 
-    rho: Float[Array, "spin grid"]
+    e_PF: Float[Array, "spin grid"], rho: Float[Array, "spin grid"]
 ) -> Float[Array, "grid"]:
     r"""Spin polarization correction to an exchange functional using eq 2.71 from
     Carsten A. Ullrich, "Time-Dependent Density-Functional Theory".
@@ -980,9 +1026,9 @@ def exchange_polarization_correction(
 
 
 def correlation_polarization_correction(
-    e_tilde_PF: Float[Array, "spin grid"], 
-    rho: Float[Array, "spin grid"], 
-    clip_cte: float = 1e-30
+    e_tilde_PF: Float[Array, "spin grid"],
+    rho: Float[Array, "spin grid"],
+    clip_cte: float = 1e-30,
 ) -> Float[Array, "grid"]:
     r"""Spin polarization correction to a correlation functional using eq 2.75 from
     Carsten A. Ullrich, "Time-Dependent Density-Functional Theory".
@@ -1009,7 +1055,9 @@ def correlation_polarization_correction(
     # assert not jnp.isnan(log_rho).any() and not jnp.isinf(log_rho).any()
     log_rs = jnp.log2((3 / (4 * jnp.pi)) ** (1 / 3)) - log_rho / 3.0
 
-    zeta = jnp.where(rho.sum(axis=1) > clip_cte, (rho[:, 0] - rho[:, 1]) / (rho.sum(axis=1)), 0.0)
+    zeta = jnp.where(
+        rho.sum(axis=1) > clip_cte, (rho[:, 0] - rho[:, 1]) / (rho.sum(axis=1)), 0.0
+    )
 
     def fzeta(z):
         zm = 2 ** (4 * jnp.log2(1 - z) / 3)
@@ -1029,11 +1077,18 @@ def correlation_polarization_correction(
     brs_3_2 = 2 ** (jnp.log2(beta3) + 3 * log_rs / 2)
     brs2 = 2 ** (jnp.log2(beta4) + 2 * log_rs)
 
-    alphac = 2 * A_ * (1 + ars) * jnp.log(1 + (1 / (2 * A_)) / (brs_1_2 + brs + brs_3_2 + brs2))
+    alphac = (
+        2
+        * A_
+        * (1 + ars)
+        * jnp.log(1 + (1 / (2 * A_)) / (brs_1_2 + brs + brs_3_2 + brs2))
+    )
     # assert not jnp.isnan(alphac).any() and not jnp.isinf(alphac).any()
 
-    fz = fzeta(zeta) #jnp.round(fzeta(zeta), int(math.log10(clip_cte)))
-    z4 = zeta**4 #jnp.round(2 ** (4 * jnp.log2(jnp.clip(zeta, a_min=clip_cte))), int(math.log10(clip_cte)))
+    fz = fzeta(zeta)  # jnp.round(fzeta(zeta), int(math.log10(clip_cte)))
+    z4 = (
+        zeta**4
+    )  # jnp.round(2 ** (4 * jnp.log2(jnp.clip(zeta, a_min=clip_cte))), int(math.log10(clip_cte)))
 
     e_tilde = (
         e_tilde_PF[:, 0]
@@ -1186,14 +1241,19 @@ def densities(
     brs2 = 2 ** (2 * log_rs + jnp.log2(beta4))
 
     e_PW92 = jnp.round(
-        -2 * A_ * (1 + ars) * jnp.log(1 + (1 / (2 * A_)) / (brs_1_2 + brs + brs_3_2 + brs2)),
+        -2
+        * A_
+        * (1 + ars)
+        * jnp.log(1 + (1 / (2 * A_)) / (brs_1_2 + brs + brs_3_2 + brs2)),
         int(math.log10(clip_cte)),
     )
 
     # Compute the local features
     for i, j in itertools.product(u_range, w_range):
         mgga_term = jnp.where(
-            jnp.greater(e_PW92, clip_cte), 2 ** (jnp.log2(e_PW92) + i * log_u_c + j * log_w_c), 0
+            jnp.greater(e_PW92, clip_cte),
+            2 ** (jnp.log2(e_PW92) + i * log_u_c + j * log_w_c),
+            0,
         )
 
         # First we concatenate the exchange terms
@@ -1263,8 +1323,10 @@ class DispersionFunctional(nn.Module):
         Calculates the energy of the functional.
         """
         if isinstance(atoms, Solid):
-            raise NotImplementedError("Dispersion functionals are not presently implemented for solids")
-        
+            raise NotImplementedError(
+                "Dispersion functionals are not presently implemented for solids"
+            )
+
         R_AB, ai = calculate_distances(atoms.nuclear_pos, atoms.atom_index)
 
         result = 0

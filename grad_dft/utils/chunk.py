@@ -19,7 +19,7 @@ from jax import lax
 from jax import numpy as jnp
 
 from jax.tree_util import tree_leaves, tree_map
-from jax import linear_util as lu
+from jax.extend import linear_util as lu
 from jax.api_util import argnums_partial
 
 from .types import Array
@@ -47,7 +47,9 @@ def _get_chunks(x, n_bulk, chunk_size):
 
 def _get_rest(x, n_bulk, n_rest):
     return tree_map(
-        lambda l: lax.dynamic_slice_in_dim(l, start_index=n_bulk, slice_size=n_rest, axis=0),
+        lambda l: lax.dynamic_slice_in_dim(
+            l, start_index=n_bulk, slice_size=n_rest, axis=0
+        ),
         x,
     )
 
@@ -58,7 +60,9 @@ def map_over_chunks(fun, argnums=0):
 
     def mapped(*args, **kwargs):
         f = lu.wrap_init(fun, kwargs)
-        f_partial, dyn_args = argnums_partial(f, argnums, args, require_static_args_hashable=False)
+        f_partial, dyn_args = argnums_partial(
+            f, argnums, args, require_static_args_hashable=False
+        )
 
         return lax.map(lambda x: f_partial.call_wrapped(*x), dyn_args)
 
@@ -72,7 +76,9 @@ def _chunk_vmapped_function(vmapped_fun, chunk_size, argnums=0):
     def out_fun(*args, **kwargs):
         f = lu.wrap_init(vmapped_fun, kwargs)
 
-        f_partial, dyn_args = argnums_partial(f, argnums, args, require_static_args_hashable=False)
+        f_partial, dyn_args = argnums_partial(
+            f, argnums, args, require_static_args_hashable=False
+        )
 
         axis_len = tree_leaves(dyn_args)[0].shape[0]
         n_chunks, n_rest = divmod(axis_len, chunk_size)
@@ -94,7 +100,10 @@ def _chunk_vmapped_function(vmapped_fun, chunk_size, argnums=0):
 
 
 def vmap_chunked(
-    f: Callable, in_axes: Union[int, Sequence[int]] = 0, *, chunk_size: Optional[int] = None
+    f: Callable,
+    in_axes: Union[int, Sequence[int]] = 0,
+    *,
+    chunk_size: Optional[int] = None
 ):
     if isinstance(in_axes, int):
         in_axes = (in_axes,)
