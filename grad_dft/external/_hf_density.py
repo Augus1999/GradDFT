@@ -45,7 +45,7 @@ def _evaluate_nu_fast(mol: Mole, coords: Array, omega: float, hermi: int) -> Arr
 
 
 def _evaluate_nu(mol: Mole, coords: Array, omega: float, hermi: bool = True) -> Array:
-    """Computes nu integrals for given coordinates.
+    r"""Computes nu integrals for given coordinates.
     \nu_{bd}(r) = \int dr' (\chi_b(r') v(r, r') \chi_d(r')), for \chi the basis functions
     """
 
@@ -70,7 +70,7 @@ def _evaluate_nu(mol: Mole, coords: Array, omega: float, hermi: bool = True) -> 
 def _nu_chunk(
     mol: Mole, coords: Array, omega: float, chunk_size: int = 1000
 ) -> Generator[Tuple[int, int, Array], None, None]:
-    """Yields chunks of nu integrals over the grid.
+    r"""Yields chunks of nu integrals over the grid.
     Args:
       mol: pyscf Mole object.
       coords: coordinates, r', at which to evaluate the nu integrals, shape (N,3).
@@ -105,7 +105,7 @@ def _nu_chunk(
 
 @jax.jit
 def _compute_exx_block(nu: Array, e: Array) -> Tuple[Array, Array]:
-    """Computes exx and fxx.
+    r"""Computes exx and fxx.
     Args:
       nu: batch of <i|v(r,r_k)|j> integrals, in format (k,i,j) where r_k is the
         position of the k-th grid point, i and j label atomic orbitals.

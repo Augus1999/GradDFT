@@ -41,8 +41,7 @@ from pyscf.ao2mo import restore
 from grad_dft.molecule import Grid, Molecule, Reaction, make_reaction
 from grad_dft.solid import Solid, KPointInfo
 from grad_dft.utils import DType, default_dtype, DensityFunctional, HartreeFock
-from grad_dft.external import NeuralNumInt, _nu_chunk
-from grad_dft.external import Functional as ExternalFunctional
+from grad_dft.external import _nu_chunk
 
 
 def grid_from_pyscf(grids: Grids, dtype: Optional[DType] = None) -> Grid:
@@ -1108,11 +1107,8 @@ def process_mol(
     mf.grids.level = int(grid_level)
     mf.grids.build()  # with_non0tab=True
     if training:
-        if xc_functional == "DM21":
-            mf._numint = NeuralNumInt(ExternalFunctional.DM21)
-        else:
-            mf.xc = xc_functional
-            # mf.nlc='VV10'
+        mf.xc = xc_functional
+        # mf.nlc='VV10'
     if max_cycle is not None:
         mf.max_cycle = max_cycle
     elif not training:

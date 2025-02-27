@@ -609,10 +609,10 @@ def dm21_densities(
     grad_rho_norm_sq = jnp.sum(grad_rho**2, axis=-1)
 
     # LDA preprocessing data
-    log_rho = jnp.log2(jnp.clip(rho, a_min=clip_cte))
+    log_rho = jnp.log2(jnp.clip(rho, min=clip_cte))
 
     # GGA preprocessing data
-    log_grad_rho_norm = jnp.log2(jnp.clip(grad_rho_norm_sq, a_min=clip_cte)) / 2
+    log_grad_rho_norm = jnp.log2(jnp.clip(grad_rho_norm_sq, min=clip_cte)) / 2
     log_x_sigma = log_grad_rho_norm - 4 / 3.0 * log_rho
     log_u_sigma = jnp.where(
         jnp.greater(log_rho, jnp.log2(clip_cte)),
@@ -621,7 +621,7 @@ def dm21_densities(
     )
 
     # MGGA preprocessing data
-    log_tau = jnp.log2(jnp.clip(tau, a_min=clip_cte))
+    log_tau = jnp.log2(jnp.clip(tau, min=clip_cte))
     log_1t_sigma = -(
         5 / 3.0 * log_rho
         - log_tau
@@ -1051,7 +1051,7 @@ def correlation_polarization_correction(
         The ready to be integrated electronic energy density.
     """
 
-    log_rho = jnp.log2(jnp.clip(rho.sum(axis=1), a_min=clip_cte))
+    log_rho = jnp.log2(jnp.clip(rho.sum(axis=1), min=clip_cte))
     # assert not jnp.isnan(log_rho).any() and not jnp.isinf(log_rho).any()
     log_rs = jnp.log2((3 / (4 * jnp.pi)) ** (1 / 3)) - log_rho / 3.0
 
@@ -1160,10 +1160,10 @@ def densities(
     grad_rho_norm_sq = jnp.sum(grad_rho**2, axis=-1)
 
     # LDA preprocessing data
-    log_rho = jnp.log2(jnp.clip(rho, a_min=clip_cte))
+    log_rho = jnp.log2(jnp.clip(rho, min=clip_cte))
 
     # GGA preprocessing data
-    log_grad_rho_norm = jnp.log2(jnp.clip(grad_rho_norm_sq, a_min=clip_cte)) / 2
+    log_grad_rho_norm = jnp.log2(jnp.clip(grad_rho_norm_sq, min=clip_cte)) / 2
     log_x_sigma = log_grad_rho_norm - 4 / 3.0 * log_rho
     log_u_sigma = jnp.where(
         jnp.greater(log_rho, jnp.log2(clip_cte)),
@@ -1172,7 +1172,7 @@ def densities(
     )
 
     # MGGA preprocessing data
-    log_tau = jnp.log2(jnp.clip(tau, a_min=clip_cte))
+    log_tau = jnp.log2(jnp.clip(tau, min=clip_cte))
     log_1t_sigma = log_tau - 5 / 3.0 * log_rho
     log_w_sigma = jnp.where(
         jnp.greater(log_rho, jnp.log2(clip_cte)),
@@ -1191,8 +1191,8 @@ def densities(
     ######### Correlation features ###############
 
     grad_rho_norm_sq_ss = jnp.sum((grad_rho.sum(axis=1)) ** 2, axis=-1)
-    log_grad_rho_norm_ss = jnp.log2(jnp.clip(grad_rho_norm_sq_ss, a_min=clip_cte)) / 2
-    log_rho_ss = jnp.log2(jnp.clip(rho.sum(axis=1), a_min=clip_cte))
+    log_grad_rho_norm_ss = jnp.log2(jnp.clip(grad_rho_norm_sq_ss, min=clip_cte)) / 2
+    log_rho_ss = jnp.log2(jnp.clip(rho.sum(axis=1), min=clip_cte))
     log_x_ss = log_grad_rho_norm_ss - 4 / 3.0 * log_rho_ss
 
     log_u_ss = jnp.where(
@@ -1209,7 +1209,7 @@ def densities(
 
     log_u_c = jnp.stack((log_u_ss, log_u_ab), axis=1)
 
-    log_tau_ss = jnp.log2(jnp.clip(tau.sum(axis=1), a_min=clip_cte))
+    log_tau_ss = jnp.log2(jnp.clip(tau.sum(axis=1), min=clip_cte))
     log_1t_ss = log_tau_ss - 5 / 3.0 * log_rho_ss
     log_w_ss = jnp.where(
         jnp.greater(log_rho.sum(axis=1), jnp.log2(clip_cte)),
@@ -1232,7 +1232,7 @@ def densities(
     beta3 = jnp.array([[1.6382, 3.3662]])
     beta4 = jnp.array([[0.49294, 0.62517]])
 
-    log_rho = jnp.log2(jnp.clip(rho.sum(axis=1, keepdims=True), a_min=clip_cte))
+    log_rho = jnp.log2(jnp.clip(rho.sum(axis=1, keepdims=True), min=clip_cte))
     log_rs = jnp.log2((3 / (4 * jnp.pi)) ** (1 / 3)) - log_rho / 3.0
     brs_1_2 = 2 ** (log_rs / 2 + jnp.log2(beta1))
     ars = 2 ** (log_rs + jnp.log2(alpha1))

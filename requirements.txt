@@ -4,7 +4,6 @@ pyscf>=2.8.0
 attrs>=25.1.0
 flax>=0.10.3
 tensorflow>=2.18.0
-tensorflow-hub>=0.16.1
 typeguard==2.13.3
 typing_extensions>=4.12.0
 jaxtyping>=0.2.38
